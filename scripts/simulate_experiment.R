@@ -143,15 +143,19 @@ second_count_model_1 <- play_wba_reparam(task_counts)
 second_count_model_2 <- play_pba(task_counts)
 
 # Dataset 1:
-  # export the fixed task in the observed 1:8 rating scale
+# export the fixed task in the observed 1:8 rating scale
 dataset_1_task <- data.frame(
   trial_id = task_counts$trial_id,
   first_rating = task_counts$direct_count + 1L,
   group_rating = task_counts$social_count + 1L
 )
 
+# Match the empirical dataset definition:
+# Feedback = GroupRating - FirstRating
+dataset_1_task$feedback <- dataset_1_task$group_rating - dataset_1_task$first_rating
+
 # Dataset 2:
-  # same task, plus each model's simulated second rating
+# same task, plus each model's simulated second rating
 dataset_2_model_choices <- data.frame(
   trial_id = task_counts$trial_id,
   first_rating = task_counts$direct_count + 1L,
@@ -160,26 +164,36 @@ dataset_2_model_choices <- data.frame(
   second_rating_model_2 = second_count_model_2 + 1L
 )
 
+dataset_2_model_choices$feedback <- dataset_2_model_choices$group_rating - dataset_2_model_choices$first_rating
+dataset_2_model_choices$change_model_1 <- dataset_2_model_choices$second_rating_model_1 - dataset_2_model_choices$first_rating
+dataset_2_model_choices$change_model_2 <- dataset_2_model_choices$second_rating_model_2 - dataset_2_model_choices$first_rating
+
 write.csv(
   dataset_1_task,
-  file.path("outputs", "simulated", "dataset_1_task.csv"),row.names = FALSE
+  file.path("outputs", "simulated", "dataset_1_task.csv"),
+  row.names = FALSE
 )
 
 write.csv(
   dataset_2_model_choices,
-  file.path("outputs", "simulated", "dataset_2_model_choices.csv"),row.names = FALSE
+  file.path("outputs", "simulated", "dataset_2_model_choices.csv"),
+  row.names = FALSE
 )
 
 # SIMPLE PLOTTING
-plot_data <- aggregate(
+old_par <- par(no.readonly = TRUE)
+on.exit(par(old_par), add = TRUE)
+par(mfrow = c(3, 1))
+
+plot_choices <- aggregate(
   cbind(second_rating_model_1, second_rating_model_2) ~ group_rating,
   data = dataset_2_model_choices,
   FUN = mean
 )
 
 plot(
-  plot_data$group_rating,
-  plot_data$group_rating,
+  plot_choices$group_rating,
+  plot_choices$group_rating,
   type = "b",
   pch = 16,
   lty = 2,
@@ -192,8 +206,8 @@ plot(
 )
 
 lines(
-  plot_data$group_rating,
-  plot_data$second_rating_model_1,
+  plot_choices$group_rating,
+  plot_choices$second_rating_model_1,
   type = "b",
   pch = 19,
   col = "steelblue",
@@ -201,8 +215,8 @@ lines(
 )
 
 lines(
-  plot_data$group_rating,
-  plot_data$second_rating_model_2,
+  plot_choices$group_rating,
+  plot_choices$second_rating_model_2,
   type = "b",
   pch = 17,
   col = "firebrick",
@@ -215,5 +229,86 @@ legend(
   col = c("gray40", "steelblue", "firebrick"),
   lty = c(2, 1, 1),
   pch = c(16, 19, 17),
+  bty = "n"
+)
+
+plot_change <- aggregate(
+  cbind(change_model_1, change_model_2) ~ feedback,
+  data = dataset_2_model_choices,
+  FUN = mean
+)
+
+plot(
+  plot_change$feedback,
+  plot_change$feedback,
+  type = "b",
+  pch = 16,
+  lty = 2,
+  col = "gray40",
+  xlim = range(dataset_2_model_choices$feedback),
+  ylim = range(
+    c(
+      dataset_2_model_choices$feedback,
+      dataset_2_model_choices$change_model_1,
+      dataset_2_model_choices$change_model_2
+    )
+  ),
+  xlab = "Feedback",
+  ylab = "Average Change From First Rating",
+  main = "Model Change vs Feedback"
+)
+
+lines(
+  plot_change$feedback,
+  plot_change$change_model_1,
+  type = "b",
+  pch = 19,
+  col = "steelblue",
+  lwd = 2
+)
+
+lines(
+  plot_change$feedback,
+  plot_change$change_model_2,
+  type = "b",
+  pch = 17,
+  col = "firebrick",
+  lwd = 2
+)
+
+legend(
+  "topleft",
+  legend = c("Feedback", "Model 1: WBA", "Model 2: PBA"),
+  col = c("gray40", "steelblue", "firebrick"),
+  lty = c(2, 1, 1),
+  pch = c(16, 19, 17),
+  bty = "n"
+)
+
+# Feedback is discrete, so the density plot is more useful for the simulated
+# change distributions than for feedback itself.
+dens_1 <- density(dataset_2_model_choices$change_model_1)
+dens_2 <- density(dataset_2_model_choices$change_model_2)
+
+plot(
+  dens_1,
+  col = "steelblue",
+  lwd = 2,
+  main = "Density of Simulated Change",
+  xlab = "Change From First Rating",
+  ylim = range(c(dens_1$y, dens_2$y))
+)
+
+lines(
+  dens_2,
+  col = "firebrick",
+  lwd = 2
+)
+
+legend(
+  "topright",
+  legend = c("Model 1: WBA", "Model 2: PBA"),
+  col = c("steelblue", "firebrick"),
+  lwd = 2,
   bty = "n"
 )
