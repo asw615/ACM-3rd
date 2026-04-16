@@ -1,0 +1,147 @@
+
+```{r}
+set.seed(1)
+pacman::p_load(cmdstanr, tidyverse, cowplot)
+theme_set(theme_minimal())
+```
+
+```{r}
+agent.WBA <- Vectorize(function(
+    alpha_prior,
+    beta_prior,
+    own_rating,
+    external_rating,
+    own_weighting,
+    external_weighting
+) {
+    alpha_post <- alpha_prior + own_weighting * (own_rating - 1) + external_weighting * (external_rating - 1)
+    beta_post  <- beta_prior  + own_weighting * (8 - own_rating) + external_weighting * (8 - external_rating)
+    
+    1 + sum(rbinom(1, size = 7, prob = rbeta(1, alpha_post, beta_post)))
+})
+
+simulate.WBA <- function(
+    n_observations,
+    alpha_prior,
+    beta_prior,
+    own_rating,
+    external_rating,
+    own_weighting,
+    external_weighting=external_weighting
+) {
+  tibble(
+    FaceID=seq(1, n_observations),
+    FirstRating=round(runif(n_observations, 1, 8)),
+    GroupRating=round(runif(n_observations, 1, 8)),
+  ) %>% mutate(
+    SecondRating=agent.WBA(
+        alpha_prior=alpha_prior,
+        beta_prior=beta_prior,
+        own_rating=FirstRating,
+        external_rating=GroupRating,
+        own_weighting=own_weighting,
+        external_weighting=external_weighting
+    ),
+  )
+}
+
+agent.PBA <- Vectorize(function(
+    alpha_prior,
+    beta_prior,
+    own_rating,
+    external_rating,
+    own_weighting
+) {
+    alpha_post <- alpha_prior + own_weighting * (own_rating - 1) + (1 - own_weighting) * (external_rating - 1)
+    beta_post  <- beta_prior  + own_weighting * (8 - own_rating) + (1 - own_weighting) * (8 - external_rating)
+    
+    1 + sum(rbinom(1, size = 7, prob = rbeta(1, alpha_post, beta_post)))
+})
+
+simulate.PBA <- function(
+    n_observations,
+    alpha_prior,
+    beta_prior,
+    own_weighting
+) {
+  tibble(
+    FaceID=seq(1, n_observations),
+    FirstRating=round(runif(n_observations, 1, 8)),
+    GroupRating=round(runif(n_observations, 1, 8)),
+  ) %>% mutate(
+    SecondRating=agent.PBA(
+        alpha_prior=alpha_prior,
+        beta_prior=beta_prior,
+        own_rating=FirstRating,
+        external_rating=GroupRating,
+        own_weighting=own_weighting
+    ),
+  )
+}
+
+simulation <- simulate.PBA(
+  n_observations=100,
+  alpha_prior=4,
+  beta_prior=3,
+  own_weighting=0.5
+  # external_weighting=2
+) %>% mutate(
+    Feedback=GroupRating-FirstRating,
+    Change=SecondRating-FirstRating,
+  )
+
+simulation
+
+ggplot(simulation) +
+  geom_jitter(aes(x=Feedback, y=Change), width=0.2, height=0.2, shape=1)
+```
+
+```{r fig.width = 10}
+simulation %>% head(20) %>%  ggplot() +
+  geom_segment(
+    aes(x=FaceID, y=FirstRating, yend=SecondRating), 
+    arrow=arrow(type="closed", length = unit(0.4, "cm"))
+  ) +
+  geom_point(
+    aes(x=FaceID, y=FirstRating), 
+    color="black"
+  ) +
+  geom_point(
+    aes(x=FaceID, y=GroupRating),
+    color="red"
+  ) +
+  scale_y_continuous(breaks=seq(1, 8)) +
+  labs(y="Rating")
+```
+
+
+
+
+
+```{r}
+simulation %>% pivot_longer(
+  cols=c(FirstRating, GroupRating, SecondRating),
+  names_to="Observation",
+  values_to="Rating",
+) %>% ggplot(aes(x=Rating)) +
+  geom_bar() +
+  stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
+  scale_x_continuous(breaks=seq(1, 8)) +
+  facet_wrap(~Observation)
+
+simulation %>% pivot_longer(
+  cols=c(Feedback, Change),
+  names_to="Observation",
+  values_to="Offset",
+) %>% ggplot(aes(x=Offset)) +
+  geom_bar() +
+  stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
+  scale_x_continuous(breaks=seq(-7, 7), limits=c(-7, 7)) +
+  facet_wrap(~factor(Observation, c("Feedback", "Change")))
+```
+
+
+
+
+
+
