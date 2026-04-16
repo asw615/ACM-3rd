@@ -6,6 +6,20 @@ theme_set(theme_minimal())
 ```
 
 ```{r}
+agent.PBA <- Vectorize(function(
+    alpha_prior,
+    beta_prior,
+    own_rating,
+    external_rating,
+    own_weighting,
+    external_weighting
+) {
+    alpha_post <- alpha_prior + own_weighting * (own_rating - 1) + (1 - own_weighting) * (external_rating - 1)
+    beta_post  <- beta_prior  + own_weighting * (8 - own_rating) + (1 - own_weighting) * (8 - external_rating)
+    
+    1 + sum(rbinom(1, size = 7, prob = rbeta(1, alpha_post, beta_post)))
+})
+
 agent.WBA <- Vectorize(function(
     alpha_prior,
     beta_prior,
@@ -20,21 +34,22 @@ agent.WBA <- Vectorize(function(
     1 + sum(rbinom(1, size = 7, prob = rbeta(1, alpha_post, beta_post)))
 })
 
-simulate.WBA <- function(
+simulate <- function(
+    agent_evaluator,
     n_observations,
     alpha_prior,
     beta_prior,
     own_rating,
     external_rating,
     own_weighting,
-    external_weighting=external_weighting
+    external_weighting
 ) {
   tibble(
     FaceID=seq(1, n_observations),
     FirstRating=round(runif(n_observations, 1, 8)),
     GroupRating=round(runif(n_observations, 1, 8)),
-  ) %>% mutate(
-    SecondRating=agent.WBA(
+  ) |> mutate(
+    SecondRating=agent_evaluator(
         alpha_prior=alpha_prior,
         beta_prior=beta_prior,
         own_rating=FirstRating,
@@ -45,59 +60,30 @@ simulate.WBA <- function(
   )
 }
 
-agent.PBA <- Vectorize(function(
-    alpha_prior,
-    beta_prior,
-    own_rating,
-    external_rating,
-    own_weighting
-) {
-    alpha_post <- alpha_prior + own_weighting * (own_rating - 1) + (1 - own_weighting) * (external_rating - 1)
-    beta_post  <- beta_prior  + own_weighting * (8 - own_rating) + (1 - own_weighting) * (8 - external_rating)
-    
-    1 + sum(rbinom(1, size = 7, prob = rbeta(1, alpha_post, beta_post)))
-})
-
-simulate.PBA <- function(
-    n_observations,
-    alpha_prior,
-    beta_prior,
-    own_weighting
-) {
-  tibble(
-    FaceID=seq(1, n_observations),
-    FirstRating=round(runif(n_observations, 1, 8)),
-    GroupRating=round(runif(n_observations, 1, 8)),
-  ) %>% mutate(
-    SecondRating=agent.PBA(
-        alpha_prior=alpha_prior,
-        beta_prior=beta_prior,
-        own_rating=FirstRating,
-        external_rating=GroupRating,
-        own_weighting=own_weighting
-    ),
-  )
-}
-
-simulation <- simulate.PBA(
+simulation <- simulate(
+  agent_evaluator=agent.PBA,
   n_observations=100,
   alpha_prior=4,
   beta_prior=3,
-  own_weighting=0.5
-  # external_weighting=2
-) %>% mutate(
+  own_weighting=0.5,
+  external_weighting=NA
+) |> mutate(
     Feedback=GroupRating-FirstRating,
     Change=SecondRating-FirstRating,
-  )
+    AbsChange=abs(SecondRating-FirstRating)
+)
 
 simulation
+```
 
+```{r}
 ggplot(simulation) +
   geom_jitter(aes(x=Feedback, y=Change), width=0.2, height=0.2, shape=1)
 ```
 
+
 ```{r fig.width = 10}
-simulation %>% head(20) %>%  ggplot() +
+simulation |> head(20) |>  ggplot() +
   geom_segment(
     aes(x=FaceID, y=FirstRating, yend=SecondRating), 
     arrow=arrow(type="closed", length = unit(0.4, "cm"))
@@ -119,25 +105,27 @@ simulation %>% head(20) %>%  ggplot() +
 
 
 ```{r}
-simulation %>% pivot_longer(
+simulation |> pivot_longer(
   cols=c(FirstRating, GroupRating, SecondRating),
   names_to="Observation",
   values_to="Rating",
-) %>% ggplot(aes(x=Rating)) +
+) |> ggplot(aes(x=Rating)) +
   geom_bar() +
   stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
   scale_x_continuous(breaks=seq(1, 8)) +
-  facet_wrap(~Observation)
+  facet_wrap(~Observation) +
+  labs(y="Observation count")
 
-simulation %>% pivot_longer(
-  cols=c(Feedback, Change),
+simulation |> pivot_longer(
+  cols=c(Feedback, Change, AbsChange),
   names_to="Observation",
   values_to="Offset",
-) %>% ggplot(aes(x=Offset)) +
+) |> ggplot(aes(x=Offset)) +
   geom_bar() +
   stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
   scale_x_continuous(breaks=seq(-7, 7), limits=c(-7, 7)) +
-  facet_wrap(~factor(Observation, c("Feedback", "Change")))
+  facet_wrap(~factor(Observation, c("Feedback", "Change", "AbsChange"))) +
+  labs(y="Observation count")
 ```
 
 
