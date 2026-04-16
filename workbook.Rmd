@@ -61,20 +61,56 @@ simulate <- function(
 }
 
 simulation <- simulate(
-  agent_evaluator=agent.PBA,
-  n_observations=100,
-  alpha_prior=4,
-  beta_prior=3,
-  own_weighting=0.5,
-  external_weighting=NA
-) |> mutate(
-    Feedback=GroupRating-FirstRating,
-    Change=SecondRating-FirstRating,
-    AbsChange=abs(SecondRating-FirstRating)
-)
+    agent_evaluator=agent.PBA,
+    n_observations=50,
+    alpha_prior=0.5,
+    beta_prior=0.5,
+    own_weighting=0.5,
+    external_weighting=NA
+  ) |> mutate(
+      Feedback=GroupRating-FirstRating,
+      Change=SecondRating-FirstRating,
+      AbsChange=abs(SecondRating-FirstRating)
+  )
+
+# for (Participant in 1:20) {
+#   simulation <- rbind(simulation, simulate(
+#     agent_evaluator=agent.PBA,
+#     n_observations=50,
+#     alpha_prior=0.5,
+#     beta_prior=0.5,
+#     own_weighting=0.5,
+#     external_weighting=NA
+#   ) |> mutate(
+#       AgentID=Participant,
+#       AgentType="PBA",
+#       Feedback=GroupRating-FirstRating,
+#       Change=SecondRating-FirstRating,
+#       AbsChange=abs(SecondRating-FirstRating)
+#   ))
+# }
 
 simulation
 ```
+
+```{r}
+model <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE))
+
+model_fit <- model$sample(
+  data = list(
+    N=nrow(simulation),
+    FirstRating=simulation$FirstRating,
+    GroupRating=simulation$GroupRating,
+    SecondRating=simulation$SecondRating
+  ),
+  seed = 0,
+  chains = 4,
+  iter_sampling = 1000,
+  iter_warmup = 1000,
+  refresh = 0
+)
+```
+
 
 ```{r}
 ggplot(simulation) +
