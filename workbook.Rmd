@@ -211,6 +211,111 @@ for (m in unique(results_all$ModelType)) {
 ```
 
 ```{r}
+
+## Model recovery
+
+n_sims <- 50
+plan(multisession, workers = parallel::detectCores() - 2)
+
+if (regenerate_simulations || !file.exists("./model_recovery.rds")) {
+
+  ## Simulation grid
+  sim_grid <- bind_rows(
+    agents_pba |>
+      mutate(ModelType = "PBA") |>
+      crossing(sim_id = 1:n_sims),       
+    agents_wba |>
+      mutate(ModelType = "WBA") |>
+      crossing(sim_id = 1:n_sims)          
+  )
+
+  ## generate dataset per row
+  recovery_data <- sim_grid |>
+    mutate(
+      agent_data = pmap(
+        list(ModelType, own_weighting, external_weighting, AgentType),
+        function(ModelType, own_weighting, external_weighting, AgentType) {
+          agent_fn <- if (ModelType == "PBA") agent.PBA else agent.WBA
+          run_sim(agent_fn, own_weighting, external_weighting,
+                  AgentType, ModelType) |>
+            drop_na(SecondRating)
+        }
+      )
+    )
+
+  ## Fit both models to each dataset
+  results_list <- vector("list", nrow(recovery_data))
+
+  for (i in seq_len(nrow(recovery_data))) {
+    true_mod        <- recovery_data$ModelType[[i]]
+    true_agent_type <- recovery_data$AgentType[[i]]
+    true_own        <- recovery_data$own_weighting[[i]]
+    true_ext        <- recovery_data$external_weighting[[i]]  ## NA for PBA rows
+    df              <- recovery_data$agent_data[[i]]
+    id              <- recovery_data$sim_id[[i]]
+
+    stan_data <- prepare_stan_data(df)
+
+    ## Fit PBA candidate
+    fit_p <- mod_proportional$sample(
+      data          = stan_data,
+      chains        = 2, iter_warmup  = 500,
+      iter_sampling = 500, refresh    = 0,
+      show_messages = FALSE, save_warmup = TRUE,
+      output_dir    = "models/temp"
+    )
+
+    ## Fit WBA candidate
+    fit_w <- mod_weighted$sample(
+      data          = stan_data,
+      chains        = 2, iter_warmup  = 500,
+      iter_sampling = 500, refresh    = 0,
+      show_messages = FALSE, save_warmup = TRUE,
+      output_dir    = "models/temp"
+    )
+
+    ## LOO-CV for model comparison
+    loo_p <- fit_p$loo()
+    loo_w <- fit_w$loo()
+
+    weights <- loo::loo_model_weights(
+      list(PBA = loo_p, WBA = loo_w),
+      method = "stacking"
+    )
+
+    ## Posterior draws
+    pba_draws <- fit_p$draws(format = "df")
+    wba_draws <- fit_w$draws(format = "df")
+
+    results_list[[i]] <- tibble(
+      sim_id             = id,
+      true_model         = true_mod,
+      true_agent_type    = true_agent_type,
+      true_own_weighting = true_own,
+      true_ext_weighting = true_ext,        ## NA for PBA-generated data
+      ## weights → how much evidence for each candidate
+      weight_PBA         = as.numeric(weights["PBA"]),
+      weight_WBA         = as.numeric(weights["WBA"]),
+      # Recovered parameters from each model
+      pba_own            = mean(pba_draws$own_weighting),  
+      wba_own            = mean(wba_draws$own_weighting),   
+      wba_ext            = mean(wba_draws$external_weighting) 
+    )
+  }
+
+  recovery_results <- bind_rows(results_list)
+  saveRDS(recovery_results, "./model_recovery.rds")
+
+} else {
+  recovery_results <- readRDS("./model_recovery.rds")
+}
+
+
+```
+
+
+
+```{r}
 model <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE))
 
 model_fits <- list()
@@ -266,7 +371,7 @@ model_fit <- model$sample(
   ),
   seed = 0,
   chains = 4,
-  iter_sampling = 2000,
+  iter_sampling = 1000,
   iter_warmup = 1000,
   refresh = 0
 )
@@ -276,7 +381,7 @@ model_fit <- model$sample(
 
 ```{r}
 
-model_fit$print(max_rows = 20)
+model_fit$print(max_rows = 30)
 
 
 ```
