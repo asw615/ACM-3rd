@@ -23,12 +23,12 @@ model {
     real beta_post = 0.5
       + p * (8 - FirstRating[i])
       + (1 - p) * (8 - GroupRating[i]);
-    target += beta_binomial_lpmf(SecondRating[i] - 1 | 7, alpha_post, beta_post); 
+    target += beta_binomial_lpmf(SecondRating[i] - 1 | 7, alpha_post, beta_post);
   }
 }
 
 generated quantities {
-  real lprior; 
+  real lprior;
   real p_prior = beta_rng(2, 2);
   vector[N] log_lik;
   array[N] int prior_pred;
@@ -37,7 +37,7 @@ generated quantities {
   lprior = beta_lpdf(p | 2, 2);
 
   for (i in 1:N) {
-    real alpha_post = 0.5 
+    real alpha_post = 0.5
       + p * (FirstRating[i] - 1)
       + (1 - p) * (GroupRating[i] - 1);
     real alpha_prior_pred = 0.5
