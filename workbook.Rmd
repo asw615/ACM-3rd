@@ -1,8 +1,8 @@
 
 ```{r}
-set.seed(0)
+set.seed(1)
 pacman::p_load(cmdstanr, tidyverse, cowplot)
-theme_set(theme_minimal())
+theme_set(theme_cowplot())
 ```
 
 ```{r}
@@ -239,3 +239,43 @@ for (type in unique(results_pba$AgentType)) {
 ```{r}
 model_fits[["Balanced"]]
 ```
+
+
+```{r}
+
+## Testing on real data 
+
+cogsci_pre <- read_csv("./data/cogsci_clean.csv")
+
+
+## Remove rows in FirstRating, GroupRating and SecondRating that are = 0 
+
+cogsci_pre <- cogsci_pre |> filter(FirstRating != 0, GroupRating != 0, SecondRating != 0)
+
+
+## Running the model on experimental data 
+
+model <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE)) ## PBA
+
+model_fit <- model$sample(
+  data = list(
+    N=nrow(cogsci_pre),
+    FirstRating=cogsci_pre$FirstRating,
+    GroupRating=cogsci_pre$GroupRating,
+    SecondRating=cogsci_pre$SecondRating
+  ),
+  seed = 0,
+  chains = 4,
+  iter_sampling = 2000,
+  iter_warmup = 1000,
+  refresh = 0
+)
+
+
+```
+
+```{r}
+model_fit$print(max_rows = 20)
+```
+
+
