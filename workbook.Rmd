@@ -1,6 +1,6 @@
 
 ```{r}
-set.seed(1)
+set.seed(0)
 pacman::p_load(cmdstanr, tidyverse, cowplot)
 theme_set(theme_cowplot())
 ```
@@ -76,6 +76,7 @@ simulation <- simulate(
 simulation
 ```
 
+
 ```{r}
 ggplot(simulation) +
   geom_jitter(aes(x=Feedback, y=Change), width=0.2, height=0.2, shape=1)
@@ -133,25 +134,24 @@ simulation |> pivot_longer(
 ## Setting up agent types
 
 agents_wba <- tibble(
-  agent_type    = c("Self-Focused", "Balanced", "Socially-Influenced"),
+  AgentType    = c("Self-Focused", "Balanced", "Socially-Influenced"),
   own_weighting = c(1.5, 1.0, 0.5),
   external_weighting = c(0.5, 1.0, 2.0)
 )
 
 agents_pba <- tibble(
-  agent_type    = c("Self-Focused", "Balanced", "Socially-Influenced"),
+  AgentType    = c("Self-Focused", "Balanced", "Socially-Influenced"),
   own_weighting = c(1.5, 1.0, 0.5),
   external_weighting = NA
 )
 
 ## Global params 
-
 n_observations <- 100
 alpha_prior    <- 4
 beta_prior     <- 3
 
-## adding columns to identify agent type and model in the results
-run_sim <- function(agent_evaluator, own_weighting, external_weighting, agent_type, model) {
+## adding columns to identify agent type and ModelType in the results
+run_sim <- function(agent_evaluator, own_weighting, external_weighting, AgentType, ModelType) {
   simulate(
     agent_evaluator    = agent_evaluator,
     n_observations     = n_observations,
@@ -163,43 +163,41 @@ run_sim <- function(agent_evaluator, own_weighting, external_weighting, agent_ty
     Feedback   = GroupRating - FirstRating,
     Change     = SecondRating - FirstRating,
     AbsChange  = abs(SecondRating - FirstRating),
-    agent_type = agent_type,
-    model      = model
+    AgentType = AgentType,
+    ModelType = ModelType
   )
 }
 
 ## run for pba typologies
 results_pba <- agents_pba |>
-  pmap(function(agent_type, own_weighting, external_weighting) {
-    run_sim(agent.PBA, own_weighting, external_weighting, agent_type, model = "PBA")
+  pmap(function(AgentType, own_weighting, external_weighting) {
+    run_sim(agent.PBA, own_weighting, external_weighting, AgentType, ModelType = "PBA")
   }) |>
-  list_rbind()
+  list_rbind() |> drop_na(SecondRating)
 
 ## run for wba typologies
 results_wba <- agents_wba |>
-  pmap(function(agent_type, own_weighting, external_weighting) {
-    run_sim(agent.WBA, own_weighting, external_weighting, agent_type, model = "WBA")
+  pmap(function(AgentType, own_weighting, external_weighting) {
+    run_sim(agent.WBA, own_weighting, external_weighting, AgentType, ModelType = "WBA")
   }) |>
-  list_rbind()
+  list_rbind()|> drop_na(SecondRating)
 
 ## combine
 results_all <- bind_rows(results_pba, results_wba)
 
-
-
 ```
+
 
 ```{r}
 
-## Plot the combined results for each model and agent_type
+## Plot the combined results for each ModelType and AgentType
 
-for (m in unique(results_all$model)) {
-  
+for (m in unique(results_all$ModelType)) {
   p <- results_all |>
-    filter(model == m) |>
-    ggplot(aes(x = SecondRating, fill = agent_type)) +
+    filter(ModelType == m) |>
+    ggplot(aes(x = SecondRating, fill = AgentType)) +
     geom_histogram(binwidth = 1, position = "dodge", colour = "white") +
-    facet_wrap(~ agent_type, labeller = label_both) +
+    facet_wrap(~ AgentType, labeller = label_both) +
     scale_fill_brewer(palette = "Set1") +
     labs(title    = paste("Distribution of Second Ratings —", m),
       x = "Second Rating",
@@ -212,6 +210,76 @@ for (m in unique(results_all$model)) {
 
 ```
 
+```{r}
+model <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE))
+
+model_fits <- list()
+
+for (type in unique(results_pba$AgentType)) {
+  agent_observations <- subset(results_pba, AgentType == type)
+  
+  model_fit <- model$sample(
+    data = list(
+      N=nrow(agent_observations),
+      FirstRating=agent_observations$FirstRating,
+      GroupRating=agent_observations$GroupRating,
+      SecondRating=agent_observations$SecondRating
+    ),
+    seed = 0,
+    chains = 4,
+    iter_sampling = 1000,
+    iter_warmup = 1000,
+    refresh = 0
+  )
+  model_fits[[type]] <- model_fit 
+}
+
+```
+
+```{r}
+model_fits[["Balanced"]]
+```
+
+
+```{r}
+
+## Testing on real data 
+
+cogsci_pre <- read_csv("./data/cogsci_clean.csv")
+
+
+## Remove rows in FirstRating, GroupRating and SecondRating that are = 0 
+
+cogsci_pre <- cogsci_pre |> filter(FirstRating != 0, GroupRating != 0, SecondRating != 0)
+
+
+## Running the model on experimental data 
+
+model <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE)) ## PBA
+
+model_fit <- model$sample(
+  data = list(
+    N=nrow(cogsci_pre),
+    FirstRating=cogsci_pre$FirstRating,
+    GroupRating=cogsci_pre$GroupRating,
+    SecondRating=cogsci_pre$SecondRating
+  ),
+  seed = 0,
+  chains = 4,
+  iter_sampling = 2000,
+  iter_warmup = 1000,
+  refresh = 0
+)
+
+
+```
+
+```{r}
+
+model_fit$print(max_rows = 20)
+
+
+```
 
 
 
