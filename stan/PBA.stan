@@ -19,7 +19,7 @@ model {
   for (i in 1:N) {
     real alpha_post = 0.5
       + p * (FirstRating[i] - 1)
-      + (1 - p) * GroupRating[i];
+      + (1 - p) * (GroupRating[i] - 1);
     real beta_post = 0.5
       + p * (8 - FirstRating[i])
       + (1 - p) * (8 - GroupRating[i]);
