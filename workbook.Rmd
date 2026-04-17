@@ -1,6 +1,6 @@
 
 ```{r}
-set.seed(0)
+set.seed(1)
 pacman::p_load(cmdstanr, tidyverse, cowplot)
 theme_set(theme_cowplot())
 ```
