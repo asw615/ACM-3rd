@@ -26,7 +26,7 @@ model {
   for (i in 1:N) {
     real alpha_post = 0.5
       + own_weighting * (FirstRating[i] - 1)
-      + external_weighting * (8 - GroupRating[i]);
+      + external_weighting * (GroupRating[i] - 1);
     real beta_post = 0.5
       + own_weighting * (8 - FirstRating[i])
       + external_weighting * (8 - GroupRating[i]);
