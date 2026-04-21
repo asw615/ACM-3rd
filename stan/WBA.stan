@@ -36,7 +36,7 @@ model {
 
 generated quantities {
   real lprior;
-  real rho_prior = beta_rng(p | 2, 2);
+  real rho_prior = beta_rng(2, 2);
   real kappa_prior = beta_rng(2, 2);
   real own_weighting_prior = rho_prior * kappa_prior;
   real external_weighting_prior = (1 - rho_prior) * kappa_prior;
@@ -45,7 +45,7 @@ generated quantities {
   array[N] int prior_pred;
   array[N] int posterior_pred;
 
-  lprior = beta_lpdf(rho | 2, 2) + lognormal_lpdf(kappa | log(2), 0.5)
+  lprior = beta_lpdf(rho | 2, 2) + lognormal_lpdf(kappa | log(2), 0.5);
 
   for (i in 1:N) {
     real alpha_post = 0.5 
