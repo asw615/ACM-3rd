@@ -1,7 +1,7 @@
 
 ```{r}
 set.seed(0)
-pacman::p_load(cmdstanr, tidyverse, cowplot)
+pacman::p_load(cmdstanr, tidyverse, cowplot, posterior)
 theme_set(theme_minimal())
 ```
 
@@ -211,31 +211,98 @@ for (m in unique(results_all$ModelType)) {
 ```
 
 ```{r}
-model <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE))
-
-model_fits <- list()
-
-for (type in unique(results_pba$AgentType)) {
-  agent_observations <- subset(results_pba, AgentType == type)
-  
-  model_fit <- model$sample(
-    data = list(
-      N=nrow(agent_observations),
-      FirstRating=agent_observations$FirstRating,
-      GroupRating=agent_observations$GroupRating,
-      SecondRating=agent_observations$SecondRating
-    ),
-    seed = 0,
-    chains = 4,
-    iter_sampling = 1000,
-    iter_warmup = 1000,
-    refresh = 0
-  )
-  model_fits[[type]] <- model_fit 
-}
+# model <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE))
+# 
+# model_fits <- list()
+# 
+# for (type in unique(results_pba$AgentType)) {
+#   agent_observations <- subset(results_pba, AgentType == type)
+#   
+#   model_fit <- model$sample(
+#     data = list(
+#       N=nrow(agent_observations),
+#       FirstRating=agent_observations$FirstRating,
+#       GroupRating=agent_observations$GroupRating,
+#       SecondRating=agent_observations$SecondRating
+#     ),
+#     seed = 0,
+#     chains = 4,
+#     iter_sampling = 1000,
+#     iter_warmup = 1000,
+#     refresh = 0
+#   )
+#   model_fits[[type]] <- model_fit 
+# }
 
 ```
 
 ```{r}
-model_fits[["Balanced"]]
+cogsci_data_observations <- read_csv("./data/cogsci_clean.csv") |> filter(ID==1) |> filter(FirstRating != 0, GroupRating != 0, SecondRating != 0) # dropping rows where FirstRating, GroupRating or SecondRating are = 0
+
+particpants_data = list(
+  N=nrow(cogsci_data_observations),
+  FirstRating=cogsci_data_observations$FirstRating,
+  GroupRating=cogsci_data_observations$GroupRating,
+  SecondRating=cogsci_data_observations$SecondRating
+)
+
+empirical_fit.PBA <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE))$sample(
+  data=particpants_data,
+  seed = 0,
+  chains = 4,
+  iter_sampling = 1000,
+  iter_warmup = 1000,
+  refresh = 0
+)
+
+empirical_fit.WBA <- cmdstan_model("./stan/WBA.stan", cpp_options=list(stan_threads=FALSE))$sample(
+  data=particpants_data,
+  seed = 0,
+  chains = 4,
+  iter_sampling = 1000,
+  iter_warmup = 1000,
+  refresh = 0
+)
 ```
+
+
+```{r}
+plot_prior_posterior <- function(
+  fit,
+  params,                    # character vector of posterior param names
+  prior_suffix = "_prior",
+  ncol = 3
+) {
+  draws <- as_draws_df(fit$draws())
+
+  post_long <- draws |>
+    subset_draws(variable = params) |>
+    as_tibble() |>
+    select(all_of(params)) |>
+    pivot_longer(everything(), names_to = "parameter", values_to = "value") |>
+    mutate(source = "Posterior")
+
+  prior_long <- draws |>
+    subset_draws(variable = paste0(params, prior_suffix)) |>
+    as_tibble() |>
+    select(all_of(paste0(params, prior_suffix))) |>
+    rename_with(~sub(paste0(prior_suffix, "$"), "", .x)) |>
+    pivot_longer(everything(), names_to = "parameter", values_to = "value") |>
+    mutate(source = "Prior")
+
+  combined <- bind_rows(prior_long, post_long)
+
+  ggplot(combined, aes(x = value, fill = source, colour = source)) +
+    geom_density(alpha = 0.35, linewidth = 0.7) +
+    facet_wrap(~parameter, scales = "free", ncol = ncol) +
+    labs(
+      title = "Prior–posterior update",
+      x = NULL, y = "Density", fill = NULL, colour = NULL
+    )
+}
+
+plot_prior_posterior(empirical_fit.PBA, params=c("p"))
+plot_prior_posterior(empirical_fit.WBA, params=c("rho", "kappa"))
+```
+
+
