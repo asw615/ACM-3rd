@@ -26,7 +26,7 @@ model {
   for (i in 1:N) {
     real alpha_post = 0.5
       + own_weighting * (FirstRating[i] - 1)
-      + external_weighting * GroupRating[i];
+      + external_weighting * (8 - GroupRating[i]);
     real beta_post = 0.5
       + own_weighting * (8 - FirstRating[i])
       + external_weighting * (8 - GroupRating[i]);
@@ -48,16 +48,16 @@ generated quantities {
   lprior = beta_lpdf(rho | 2, 2) + lognormal_lpdf(kappa | log(2), 0.5);
 
   for (i in 1:N) {
-    real alpha_post = 0.5 
+    real alpha_post = 0.5
       + own_weighting * (FirstRating[i] - 1)
-      + external_weighting * GroupRating[i];
-    real beta_post = 0.5
-      + own_weighting * (8 - FirstRating[i])
-      + external_weighting * (8 - GroupRating[i]);
-
+      + external_weighting * (GroupRating[i] - 1);
     real alpha_prior_pred = 0.5
       + own_weighting_prior * (FirstRating[i] - 1)
       + external_weighting_prior * (GroupRating[i] - 1);
+    
+    real beta_post = 0.5
+      + own_weighting * (8 - FirstRating[i])
+      + external_weighting * (8 - GroupRating[i]);
     real beta_prior_pred = 0.5
       + own_weighting_prior * (8 - FirstRating[i])
       + external_weighting_prior * (8 - GroupRating[i]);
