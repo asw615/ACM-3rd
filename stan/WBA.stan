@@ -20,7 +20,7 @@ transformed parameters {
 model {
   // PRIOR
   target += beta_lpdf(rho | 2, 2);
-  target += beta_lpdf(kappa | log(2), 0.5);
+  target += lognormal_lpdf(kappa | log(2), 0.5);
 
   // POSTERIOR LOOP
   for (i in 1:N) {
@@ -37,7 +37,7 @@ model {
 generated quantities {
   real lprior;
   real rho_prior = beta_rng(2, 2);
-  real kappa_prior = beta_rng(2, 2);
+  real kappa_prior = lognormal_rng(log(2), 0.5);
   real own_weighting_prior = rho_prior * kappa_prior;
   real external_weighting_prior = (1 - rho_prior) * kappa_prior;
 
