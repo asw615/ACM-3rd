@@ -1,7 +1,9 @@
 
 // PROPORTIONAL BAYESIAN AGENT (PBA) 
- //  - Uses proportional updating based on discrepancy
- //  - Includes variants (k and k-1 style updating)
+//  - Uses proportional updating based on discrepancy
+ 
+ // p in [0,1] allocates the unit evidence budget between direct and social.
+// p = 0.5 approximates balanced weighting; p -> 1 ignores social; p -> 0 ignores direct.
 
 data {
   int<lower=1> N;                       
@@ -13,8 +15,8 @@ data {
 
 parameters {
   real<lower=0, upper=1> p;  // PBA parameter: weight placed on the participant's own first rating.
+  // Allocation to direct evidence
 }
-
 
 model {
   // PRIOR
@@ -24,14 +26,11 @@ model {
     real alpha_post = 0.5
       + p * direct_count[i]
       + (1 - p) * social_count[i];   // Posterior alpha: weighted "success" evidence from self and group.
-
     real beta_post = 0.5
       + p * (choice_total - direct_count[i])
       + (1 - p) * (choice_total - social_count[i]); // Posterior beta: weighted "failure" evidence from self and group.
   // LIKELIHOOOD OF SECOND RATING
     target += beta_binomial_lpmf(choice[i] | choice_total, alpha_post, beta_post); 
-    
-    
   }
 }
 
@@ -42,8 +41,6 @@ generated quantities {
   vector[N] log_lik;            // Pointwise log-likelihood values for LOO.
   array[N] int prior_pred;       // Prior predictive second ratings on the 0:7 scale.
   array[N] int posterior_pred;    // Posterior predictive second ratings on the 0:7 scale.
-
-
 
   for (i in 1:N) {
     // This builds the fitted beta-binomial 

@@ -112,8 +112,6 @@ make_stan_data <- function(sim_data) {
     choice_total = CHOICE_TOTAL
   )
 }
-
-
 # -----------------------------
 # Recovery design
 # -----------------------------

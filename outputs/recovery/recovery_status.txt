@@ -1,0 +1,4 @@
+seed: 20260416
+warning_signs: TRUE
+recovered_all_true_models: FALSE
+any_unstable_fit: FALSE
