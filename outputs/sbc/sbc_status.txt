@@ -1,0 +1,6 @@
+seed: 20260421
+n_simulations_per_model: 20
+total_divergences: 0
+max_rhat: 1.01535008655731
+min_ess_bulk: 498.841467257042
+min_ebfmi: 0.675354516154472

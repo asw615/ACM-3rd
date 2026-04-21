@@ -1,7 +1,7 @@
-# Minimal simulation script aligned with the branch scaffold.
+# Minimal simulation script aligned with the shared branch scaffold.
 #
-# 1. Scaling internally as 0:7
-# 2. Builds an evidence grid task.
+# 1. Keeps the later fitting representation on the 0:7 pseudo-count scale.
+# 2. Simulates one random 100-trial task, as in Daniel's workbook.
 # 3. Models:
 #    - Model 1: reparameterized WBA (rho, kappa)
 #    - Model 2: PBA (p)
@@ -9,6 +9,7 @@
 #    - dataset_1_task.csv
 #    - dataset_2_model_choices.csv
 SEED <- 123
+N_TRIALS <- 100L
 dir.create(file.path("outputs", "simulated"), recursive = TRUE, showWarnings = FALSE)
 # -----------------------------
 # Empirical-data helper
@@ -43,22 +44,24 @@ draw_beta_binomial_count <- function(size, alpha, beta) {
 # -----------------------------
 # Build the simulated task
 # -----------------------------
-  # Keep the task on the 0:7 scale internally, 
-  #to avoid confusion with the 1:8 scale used in the user-facing CSV files.
-build_evidence_grid <- function(total_direct = 7L,
-                                total_social = 7L,
-                                repeats_per_cell = 1L) {
-  base_grid <- expand.grid(
-    direct_count = 0:total_direct,
-    social_count = 0:total_social
+# Daniel's workbook uses one random task with 100 trials.
+# We sample observed ratings on the 1:8 scale, then convert them to 0:7
+# internally so the Stan-ready representation stays consistent.
+build_random_task <- function(n_trials = N_TRIALS, seed = SEED) {
+  set.seed(seed)
+
+  task <- data.frame(
+    trial_id = seq_len(n_trials),
+    first_rating = round(runif(n_trials, min = 1, max = 8)),
+    group_rating = round(runif(n_trials, min = 1, max = 8))
   )
 
-  grid <- base_grid[rep(seq_len(nrow(base_grid)), each = repeats_per_cell), , drop = FALSE]
-  grid$trial_id <- seq_len(nrow(grid))
-  grid$total_direct <- total_direct
-  grid$total_social <- total_social
+  task$direct_count <- task$first_rating - 1L
+  task$social_count <- task$group_rating - 1L
+  task$total_direct <- 7L
+  task$total_social <- 7L
 
-  grid
+  task
 }
 
 # -----------------------------
@@ -133,11 +136,7 @@ play_pba <- function(task,
 
 set.seed(SEED)
 
-task_counts <- build_evidence_grid(
-  total_direct = 7L,
-  total_social = 7L,
-  repeats_per_cell = 1L
-)
+task_counts <- build_random_task()
 
 second_count_model_1 <- play_wba_reparam(task_counts)
 second_count_model_2 <- play_pba(task_counts)
@@ -146,8 +145,8 @@ second_count_model_2 <- play_pba(task_counts)
 # export the fixed task in the observed 1:8 rating scale
 dataset_1_task <- data.frame(
   trial_id = task_counts$trial_id,
-  first_rating = task_counts$direct_count + 1L,
-  group_rating = task_counts$social_count + 1L
+  first_rating = task_counts$first_rating,
+  group_rating = task_counts$group_rating
 )
 
 # Match the empirical dataset definition:
@@ -158,8 +157,8 @@ dataset_1_task$feedback <- dataset_1_task$group_rating - dataset_1_task$first_ra
 # same task, plus each model's simulated second rating
 dataset_2_model_choices <- data.frame(
   trial_id = task_counts$trial_id,
-  first_rating = task_counts$direct_count + 1L,
-  group_rating = task_counts$social_count + 1L,
+  first_rating = task_counts$first_rating,
+  group_rating = task_counts$group_rating,
   second_rating_model_1 = second_count_model_1 + 1L,
   second_rating_model_2 = second_count_model_2 + 1L
 )
