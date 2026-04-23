@@ -20,7 +20,7 @@ transformed parameters {
 model {
   // PRIOR
   target += beta_lpdf(rho | 2, 2);
-  target += beta_lpdf(kappa | log(2), 0.5);
+  target += lognormal_lpdf(kappa | log(2), 0.5);
 
   // POSTERIOR LOOP
   for (i in 1:N) {
@@ -30,14 +30,14 @@ model {
     real beta_post = 0.5
       + own_weighting * (8 - FirstRating[i])
       + external_weighting * (8 - GroupRating[i]);
-    target += beta_binomial_lpmf(SecondRating[i] - 1 | 7, alpha_post, beta_post); 
+    target += beta_binomial_lpmf(SecondRating[i] - 1 | 7, alpha_post, beta_post);
   }
 }
 
 generated quantities {
   real lprior;
-  real rho_prior = beta_rng(p | 2, 2);
-  real kappa_prior = beta_rng(2, 2);
+  real rho_prior = beta_rng(2, 2);
+  real kappa_prior = lognormal_rng(log(2), 0.5);
   real own_weighting_prior = rho_prior * kappa_prior;
   real external_weighting_prior = (1 - rho_prior) * kappa_prior;
 
@@ -45,12 +45,12 @@ generated quantities {
   array[N] int prior_pred;
   array[N] int posterior_pred;
 
-  lprior = beta_lpdf(rho | 2, 2) + lognormal_lpdf(kappa | log(2), 0.5)
+  lprior = beta_lpdf(rho | 2, 2) + lognormal_lpdf(kappa | log(2), 0.5);
 
   for (i in 1:N) {
-    real alpha_post = 0.5 
+    real alpha_post = 0.5
       + own_weighting * (FirstRating[i] - 1)
-      + external_weighting * GroupRating[i];
+      + external_weighting * (GroupRating[i] - 1);
     real beta_post = 0.5
       + own_weighting * (8 - FirstRating[i])
       + external_weighting * (8 - GroupRating[i]);
