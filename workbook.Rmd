@@ -1,7 +1,7 @@
 
 ```{r}
 set.seed(1)
-pacman::p_load(cmdstanr, tidyverse, cowplot)
+pacman::p_load(cmdstanr, tidyverse, cowplot, loo)
 theme_set(theme_cowplot())
 ```
 
@@ -279,3 +279,217 @@ model_fit$print(max_rows = 20)
 ```
 
 
+```{r}
+## Load and prepare empirical data
+
+cogsci <- read_csv("./data/cogsci_clean.csv") |>
+  filter(FirstRating != 0, GroupRating != 0, SecondRating != 0) |>
+  mutate(
+    Feedback  = GroupRating - FirstRating,
+    Change    = SecondRating - FirstRating,
+    AbsChange = abs(SecondRating - FirstRating)
+  )
+```
+
+```{r}
+## Rating distributions
+
+cogsci |>
+  pivot_longer(c(FirstRating, GroupRating, SecondRating), names_to = "Observation", values_to = "Rating") |>
+  ggplot(aes(x = Rating)) +
+  geom_bar() +
+  stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
+  scale_x_continuous(breaks = 1:8) +
+  facet_wrap(~Observation) + labs(y = "Count")
+
+cogsci |>
+  pivot_longer(c(Feedback, Change, AbsChange), names_to = "Observation", values_to = "Offset") |>
+  ggplot(aes(x = Offset)) +
+  geom_bar() +
+  stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
+  scale_x_continuous(breaks = -7:7, limits = c(-7, 7)) +
+  facet_wrap(~factor(Observation, c("Feedback", "Change", "AbsChange"))) + labs(y = "Count")
+```
+
+```{r}
+## Per-participant mean absolute change
+
+cogsci |> group_by(ID) |>
+  summarise(MeanAbsChange = mean(AbsChange)) |>
+  ggplot(aes(x = MeanAbsChange)) +
+  geom_histogram(binwidth = 0.2, fill = "grey70", colour = "white") +
+  labs(x = "Mean |Change|", y = "Participants")
+```
+
+```{r}
+## Compile models
+
+mod_pba <- cmdstan_model("./stan/PBA.stan")
+mod_wba <- cmdstan_model("./stan/WBA.stan")
+```
+
+```{r}
+## No-pooling fits — one per participant per model
+
+participants <- unique(cogsci$ID)
+pba_fits <- list()
+wba_fits <- list()
+
+for (id in participants) {
+  d <- filter(cogsci, ID == id)
+  stan_data <- list(
+    N = nrow(d), FirstRating = d$FirstRating,
+    GroupRating = d$GroupRating, SecondRating = d$SecondRating
+  )
+  pba_fits[[as.character(id)]] <- mod_pba$sample(
+    data = stan_data, seed = 0, chains = 4,
+    iter_warmup = 1000, iter_sampling = 1000, refresh = 0
+  )
+  wba_fits[[as.character(id)]] <- mod_wba$sample(
+    data = stan_data, seed = 0, chains = 4,
+    iter_warmup = 1000, iter_sampling = 1000, refresh = 0
+  )
+}
+```
+
+```{r}
+## Sampling diagnostics
+
+diag_df <- map_dfr(c("PBA", "WBA"), function(m) {
+  fits <- if (m == "PBA") pba_fits else wba_fits
+  map_dfr(as.character(participants), function(id) {
+    f <- fits[[id]]
+    tibble(
+      ID          = id,
+      model       = m,
+      Divergences = sum(f$diagnostic_summary()$num_divergent),
+      MaxRhat     = max(f$summary()$rhat, na.rm = TRUE),
+      MinESS      = min(f$summary()$ess_bulk, na.rm = TRUE)
+    )
+  })
+})
+
+diag_df |> group_by(model) |>
+  summarise(TotalDivergences = sum(Divergences), MaxRhat = max(MaxRhat), MinESS = min(MinESS))
+
+diag_df |> ggplot(aes(x = MaxRhat, fill = model)) +
+  geom_histogram(binwidth = 0.01, position = "dodge", colour = "white") +
+  scale_fill_brewer(palette = "Set1") +
+  geom_vline(xintercept = 1.01, linetype = "dashed") +
+  labs(x = "Max Rhat", y = "Participants", fill = "Model")
+```
+
+```{r}
+## Prior-posterior update — first participant
+
+id1 <- as.character(participants[1])
+
+pba_draws <- pba_fits[[id1]]$draws(format = "df") |> select(p, p_prior)
+wba_draws <- wba_fits[[id1]]$draws(format = "df") |> select(rho, kappa, rho_prior, kappa_prior)
+
+p1 <- ggplot(pba_draws) +
+  geom_density(aes(x = p_prior), fill = "blue", alpha = 0.3) +
+  geom_density(aes(x = p),       fill = "red",  alpha = 0.3) +
+  labs(title = "PBA: p", x = "p")
+
+p2 <- ggplot(wba_draws) +
+  geom_density(aes(x = rho_prior), fill = "blue", alpha = 0.3) +
+  geom_density(aes(x = rho),       fill = "red",  alpha = 0.3) +
+  labs(title = "WBA: rho", x = "rho")
+
+p3 <- ggplot(wba_draws) +
+  geom_density(aes(x = kappa_prior), fill = "blue", alpha = 0.3) +
+  geom_density(aes(x = kappa),       fill = "red",  alpha = 0.3) +
+  labs(title = "WBA: kappa", x = "kappa")
+
+plot_grid(p1, p2, p3, nrow = 1)
+```
+
+```{r}
+## Posterior parameter estimates across participants
+
+param_df <- map_dfr(as.character(participants), function(id) {
+  pba_s <- pba_fits[[id]]$summary("p")
+  wba_s <- wba_fits[[id]]$summary(c("rho", "kappa"))
+  bind_rows(
+    tibble(ID = id, model = "PBA", parameter = "p",
+           mean = pba_s$mean, q5 = pba_s$q5, q95 = pba_s$q95),
+    tibble(ID = id, model = "WBA", parameter = "rho",
+           mean = wba_s$mean[1], q5 = wba_s$q5[1], q95 = wba_s$q95[1]),
+    tibble(ID = id, model = "WBA", parameter = "kappa",
+           mean = wba_s$mean[2], q5 = wba_s$q5[2], q95 = wba_s$q95[2])
+  )
+})
+
+param_df |> ggplot(aes(x = ID, y = mean, ymin = q5, ymax = q95, colour = model)) +
+  geom_pointrange(position = position_dodge(0.5), size = 0.3) +
+  scale_colour_brewer(palette = "Set1") +
+  facet_wrap(~parameter, scales = "free_y") +
+  theme(axis.text.x = element_blank()) +
+  labs(x = "Participant", y = "Estimate", colour = "Model")
+```
+
+```{r}
+## Posterior predictive checks — first participant
+
+d1 <- filter(cogsci, ID == participants[1])
+
+ppc_df <- bind_rows(
+  tibble(rating = as.vector(pba_fits[[id1]]$draws("posterior_pred", format = "matrix")), type = "Posterior", model = "PBA"),
+  tibble(rating = as.vector(pba_fits[[id1]]$draws("prior_pred",     format = "matrix")), type = "Prior",     model = "PBA"),
+  tibble(rating = rep(d1$SecondRating, 4000),                                            type = "Observed",  model = "PBA"),
+  tibble(rating = as.vector(wba_fits[[id1]]$draws("posterior_pred", format = "matrix")), type = "Posterior", model = "WBA"),
+  tibble(rating = as.vector(wba_fits[[id1]]$draws("prior_pred",     format = "matrix")), type = "Prior",     model = "WBA"),
+  tibble(rating = rep(d1$SecondRating, 4000),                                            type = "Observed",  model = "WBA")
+)
+
+ppc_df |> ggplot(aes(x = rating, fill = type)) +
+  geom_density(alpha = 0.4, adjust = 1.5) +
+  scale_fill_brewer(palette = "Set1") +
+  scale_x_continuous(breaks = 1:8) +
+  facet_wrap(~model) +
+  labs(x = "Second Rating", y = "Density", fill = NULL)
+```
+
+```{r}
+## Aggregated PPC across all participants
+
+agg_ppc <- map_dfr(as.character(participants), function(id) {
+  d   <- filter(cogsci, ID == as.integer(id))
+  n_d <- nrow(pba_fits[[id]]$draws("posterior_pred", format = "matrix"))
+  bind_rows(
+    tibble(rating = as.vector(pba_fits[[id]]$draws("posterior_pred", format = "matrix")), type = "Posterior", model = "PBA"),
+    tibble(rating = rep(d$SecondRating, n_d),                                             type = "Observed",  model = "PBA"),
+    tibble(rating = as.vector(wba_fits[[id]]$draws("posterior_pred", format = "matrix")), type = "Posterior", model = "WBA"),
+    tibble(rating = rep(d$SecondRating, n_d),                                             type = "Observed",  model = "WBA")
+  )
+})
+
+agg_ppc |> ggplot(aes(x = rating, fill = type)) +
+  geom_density(alpha = 0.4, adjust = 1.5) +
+  scale_fill_brewer(palette = "Set1") +
+  scale_x_continuous(breaks = 1:8) +
+  facet_wrap(~model) +
+  labs(x = "Second Rating", y = "Density", fill = NULL, title = "Aggregated PPC")
+```
+
+```{r}
+## LOO model comparison
+
+loo_df <- map_dfr(as.character(participants), function(id) {
+  tibble(
+    ID       = id,
+    elpd_pba = pba_fits[[id]]$loo()$estimates["elpd_loo", "Estimate"],
+    elpd_wba = wba_fits[[id]]$loo()$estimates["elpd_loo", "Estimate"]
+  )
+}) |> mutate(elpd_diff = elpd_wba - elpd_pba)
+
+loo_df |> summarise(elpd_pba = sum(elpd_pba), elpd_wba = sum(elpd_wba), diff = sum(elpd_diff))
+
+loo_df |> ggplot(aes(x = as.factor(ID), y = elpd_diff)) +
+  geom_col(aes(fill = elpd_diff > 0)) +
+  scale_fill_brewer(palette = "Set1") +
+  geom_hline(yintercept = 0) +
+  theme(axis.text.x = element_blank()) +
+  labs(x = "Participant", y = "ELPD diff (WBA - PBA)", fill = "WBA better")
+```
