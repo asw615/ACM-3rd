@@ -8,7 +8,7 @@ data {
 }
 
 parameters {
-  real<lower=0, upper=1> p;  // PBA parameter: relative weight placed on the participant's own first rating.
+  real<lower=0, upper=1> p;
 }
 
 model {
@@ -19,7 +19,7 @@ model {
   for (i in 1:N) {
     real alpha_post = 0.5
       + p * (FirstRating[i] - 1)
-      + (1 - p) * GroupRating[i];
+      + (1 - p) * (GroupRating[i]);
     real beta_post = 0.5
       + p * (8 - FirstRating[i])
       + (1 - p) * (8 - GroupRating[i]);
@@ -28,23 +28,25 @@ model {
 }
 
 generated quantities {
-  real lprior = beta_lpdf(p | 2, 2);
+  real lprior; 
   real p_prior = beta_rng(2, 2);
   vector[N] log_lik;
   array[N] int prior_pred;
   array[N] int posterior_pred;
 
+  lprior = beta_lpdf(p | 2, 2);
+
   for (i in 1:N) {
     real alpha_post = 0.5 
       + p * (FirstRating[i] - 1)
       + (1 - p) * (GroupRating[i] - 1);
-    real beta_post = 0.5
-      + p * (8 - FirstRating[i])
-      + (1 - p) * (8 - GroupRating[i]);
-
     real alpha_prior_pred = 0.5
       + p_prior * (FirstRating[i] - 1)
       + (1 - p_prior) * (GroupRating[i] - 1);
+    
+    real beta_post = 0.5
+      + p * (8 - FirstRating[i])
+      + (1 - p) * (8 - GroupRating[i]);
     real beta_prior_pred = 0.5
       + p_prior * (8 - FirstRating[i])
       + (1 - p_prior) * (8 - GroupRating[i]);

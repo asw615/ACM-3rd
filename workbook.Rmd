@@ -1,38 +1,41 @@
 
 ```{r}
 set.seed(1)
-pacman::p_load(cmdstanr, tidyverse, cowplot)
+pacman::p_load(cmdstanr, tidyverse, cowplot, bayesplot)
 theme_set(theme_cowplot())
 ```
 
-```{r}
-agent.PBA <- Vectorize(function(
-    alpha_prior,
-    beta_prior,
-    own_rating,
-    external_rating,
-    own_weighting,
-    external_weighting
-) {
-    alpha_post <- alpha_prior + own_weighting * (own_rating - 1) + (1 - own_weighting) * (external_rating - 1)
-    beta_post  <- beta_prior  + own_weighting * (8 - own_rating) + (1 - own_weighting) * (8 - external_rating)
-    
-    1 + sum(rbinom(1, size = 7, prob = rbeta(1, alpha_post, beta_post)))
-})
 
+
+```{r}
 agent.WBA <- Vectorize(function(
-    alpha_prior,
-    beta_prior,
-    own_rating,
-    external_rating,
-    own_weighting,
-    external_weighting
+    alpha_prior, beta_prior,
+    own_rating, external_rating,
+    own_weighting, external_weighting
 ) {
     alpha_post <- alpha_prior + own_weighting * (own_rating - 1) + external_weighting * (external_rating - 1)
     beta_post  <- beta_prior  + own_weighting * (8 - own_rating) + external_weighting * (8 - external_rating)
     
+    alpha_post <- max(alpha_post, 1e-6)  ### Fix dodgy vals
+    beta_post  <- max(beta_post,  1e-6)
+    
     1 + sum(rbinom(1, size = 7, prob = rbeta(1, alpha_post, beta_post)))
 })
+
+agent.PBA <- Vectorize(function(
+    alpha_prior, beta_prior,
+    own_rating, external_rating,
+    own_weighting, external_weighting
+) {
+    alpha_post <- alpha_prior + own_weighting * (own_rating - 1) + (1 - own_weighting) * (external_rating - 1)
+    beta_post  <- beta_prior  + own_weighting * (8 - own_rating) + (1 - own_weighting) * (8 - external_rating)
+    
+    alpha_post <- max(alpha_post, 1e-6)
+    beta_post  <- max(beta_post,  1e-6)
+    
+    1 + sum(rbinom(1, size = 7, prob = rbeta(1, alpha_post, beta_post)))
+})
+
 
 simulate <- function(
     agent_evaluator,
@@ -197,9 +200,9 @@ for (m in unique(results_all$ModelType)) {
     filter(ModelType == m) |>
     ggplot(aes(x = SecondRating, fill = AgentType)) +
     geom_histogram(binwidth = 1, position = "dodge", colour = "white") +
-    facet_wrap(~ AgentType, labeller = label_both) +
+    facet_wrap(~ AgentType) +
     scale_fill_brewer(palette = "Set1") +
-    labs(title    = paste("Distribution of Second Ratings —", m),
+    labs(title    = paste("Distribution of Second Ratings:", m),
       x = "Second Rating",
       y = "Count",
       fill = "Agent Type") +
@@ -212,66 +215,85 @@ for (m in unique(results_all$ModelType)) {
 
 ```{r}
 
-## Model recovery
+## Model recovery across PBA and WBA agent typologies
+n_sims <- 10 ## EDIT FOR REAL RECOV PLEASE MATTIS
 
-n_sims <- 50
-plan(multisession, workers = parallel::detectCores() - 2)
+## Function for prepping the data 
+
+prepare_stan_data <- function(df) {
+  list(
+    N            = nrow(df),
+    FirstRating  = as.integer(df$FirstRating),
+    GroupRating  = as.integer(df$GroupRating),
+    SecondRating = as.integer(df$SecondRating)
+  )
+}
+
+
+regenerate_simulations <- TRUE  # set to FALSE to load from disk next time
 
 if (regenerate_simulations || !file.exists("./model_recovery.rds")) {
 
-  ## Simulation grid
+  ## Build simulation grid 
+  ## Cross each agent typology with n_sims replicates
   sim_grid <- bind_rows(
-    agents_pba |>
-      mutate(ModelType = "PBA") |>
-      crossing(sim_id = 1:n_sims),       
-    agents_wba |>
-      mutate(ModelType = "WBA") |>
-      crossing(sim_id = 1:n_sims)          
-  )
+    agents_pba |> mutate(ModelType = "PBA"),
+    agents_wba |> mutate(ModelType = "WBA")
+  ) |>
+    crossing(sim_id = 1:n_sims) 
 
-  ## generate dataset per row
-  recovery_data <- sim_grid |>
-    mutate(
-      agent_data = pmap(
-        list(ModelType, own_weighting, external_weighting, AgentType),
-        function(ModelType, own_weighting, external_weighting, AgentType) {
-          agent_fn <- if (ModelType == "PBA") agent.PBA else agent.WBA
-          run_sim(agent_fn, own_weighting, external_weighting,
-                  AgentType, ModelType) |>
-            drop_na(SecondRating)
-        }
-      )
+  ## Fit both candidate models to every simulated dataset
+  results_list <- vector("list", nrow(sim_grid))
+
+  for (i in seq_len(nrow(sim_grid))) {
+    row             <- sim_grid[i, ]
+    true_mod        <- row$ModelType
+    true_agent_type <- row$AgentType
+    true_own        <- row$own_weighting
+    true_ext        <- row$external_weighting  # NA for PBA rows
+    id              <- row$sim_id
+
+    ## Simulate fresh data 
+    agent_fn <- if (true_mod == "PBA") agent.PBA else agent.WBA
+
+    df <- run_sim(
+      agent_evaluator    = agent_fn,
+      own_weighting      = true_own,
+      external_weighting = true_ext,
+      AgentType          = true_agent_type,
+      ModelType          = true_mod
     )
-
-  ## Fit both models to each dataset
-  results_list <- vector("list", nrow(recovery_data))
-
-  for (i in seq_len(nrow(recovery_data))) {
-    true_mod        <- recovery_data$ModelType[[i]]
-    true_agent_type <- recovery_data$AgentType[[i]]
-    true_own        <- recovery_data$own_weighting[[i]]
-    true_ext        <- recovery_data$external_weighting[[i]]  ## NA for PBA rows
-    df              <- recovery_data$agent_data[[i]]
-    id              <- recovery_data$sim_id[[i]]
 
     stan_data <- prepare_stan_data(df)
+    
+    ## Init models 
+    
+    mod_proportional <- cmdstan_model("./stan/PBA.stan")
+    mod_weighted     <- cmdstan_model("./stan/WBA.stan")
+    
 
-    ## Fit PBA candidate
+    ## Fit PBA candidate model
     fit_p <- mod_proportional$sample(
       data          = stan_data,
-      chains        = 2, iter_warmup  = 500,
-      iter_sampling = 500, refresh    = 0,
-      show_messages = FALSE, save_warmup = TRUE,
-      output_dir    = "models/temp"
+      chains        = 2,
+      iter_warmup   = 500,
+      iter_sampling = 500,
+      refresh       = 0,
+      show_messages = FALSE,
+      save_warmup   = TRUE,
+      output_dir    = "./temp"
     )
 
-    ## Fit WBA candidate
+    ## Fit WBA candidate model
     fit_w <- mod_weighted$sample(
       data          = stan_data,
-      chains        = 2, iter_warmup  = 500,
-      iter_sampling = 500, refresh    = 0,
-      show_messages = FALSE, save_warmup = TRUE,
-      output_dir    = "models/temp"
+      chains        = 2,
+      iter_warmup   = 500,
+      iter_sampling = 500,
+      refresh       = 0,
+      show_messages = FALSE,
+      save_warmup   = TRUE,
+      output_dir    = "./temp"
     )
 
     ## LOO-CV for model comparison
@@ -292,14 +314,20 @@ if (regenerate_simulations || !file.exists("./model_recovery.rds")) {
       true_model         = true_mod,
       true_agent_type    = true_agent_type,
       true_own_weighting = true_own,
-      true_ext_weighting = true_ext,        ## NA for PBA-generated data
-      ## weights → how much evidence for each candidate
-      weight_PBA         = as.numeric(weights["PBA"]),
-      weight_WBA         = as.numeric(weights["WBA"]),
-      # Recovered parameters from each model
-      pba_own            = mean(pba_draws$own_weighting),  
-      wba_own            = mean(wba_draws$own_weighting),   
-      wba_ext            = mean(wba_draws$external_weighting) 
+      true_ext_weighting = true_ext,          # NA for PBA-generated rows
+
+      ## Stacking weights — primary recovery signal
+      weight_PBA = as.numeric(weights["PBA"]),
+      weight_WBA = as.numeric(weights["WBA"]),
+
+      ## Recovered parameters from PBA candidate
+      ## PBA only has own_weighting (external_weighting = 1 - own_weighting)
+      pba_recovered_own = mean(pba_draws$p),
+      pba_recovered_ext = 1 - mean(pba_draws$p),
+
+      ## Recovered parameters from WBA candidate
+      wba_recovered_own = mean(wba_draws$own_weighting),
+      wba_recovered_ext = mean(wba_draws$external_weighting)
     )
   }
 
@@ -309,6 +337,89 @@ if (regenerate_simulations || !file.exists("./model_recovery.rds")) {
 } else {
   recovery_results <- readRDS("./model_recovery.rds")
 }
+
+```
+
+
+```{r}
+## Visualizing the sampling process 
+
+# fit wba
+
+np_w <- nuts_params(fit_w)
+
+# Trace plots
+bayesplot::mcmc_trace(
+  fit_w$draws(format = "array"),
+  pars = c("rho", "kappa"),
+  np   = np_w
+)
+
+
+# fit pba 
+np_p <- nuts_params(fit_p)
+
+
+# Trace plots
+bayesplot::mcmc_trace(
+  fit_p$draws(format = "array"),
+  pars = "p",
+  np   = np_p
+)
+
+cat("PBA divergences:", mean(np_p$Value[np_p$Parameter == "divergent__"]) * 100, "%\n")
+cat("WBA divergences:", mean(np_w$Value[np_w$Parameter == "divergent__"]) * 100, "%\n")
+
+```
+
+
+
+
+```{r}
+
+## Visualizations of the model recovery - Riccardos Viz - Currently the models are not very distinguishable, its all just PBA
+
+binary_matrix <- recovery_results |>
+  # 1. Reshape to make finding the maximum weight per simulation easier
+  pivot_longer(cols = starts_with("weight_"), 
+               names_to = "predicted_model", values_to = "weight") |>
+  mutate(predicted_model = str_remove(predicted_model, "weight_")) |>
+  
+  # 2. Keep only the winning model for each simulation
+  group_by(sim_id) |>
+  slice_max(weight, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  
+  # 3. Count the wins and calculate proportions per true model
+  count(true_model, predicted_model) |>
+  group_by(true_model) |>
+  mutate(proportion = n / sum(n)) |>
+  ungroup() |>
+  
+  # 4. Ensure we have all combinations factored correctly (handles 0% scenarios)
+  mutate(
+    true_model = factor(true_model, levels = c("PBA", "WBA")),
+    predicted_model = factor(predicted_model, levels = c("PBA", "WBA"))
+  ) |>
+  complete(true_model, predicted_model, fill = list(n = 0, proportion = 0))
+
+
+binary_matrix |>
+  ggplot(aes(x = predicted_model, y = true_model, fill = proportion)) +
+  geom_tile(color = "white", linewidth = 1) +
+  geom_text(aes(label = scales::percent(proportion, accuracy = 1)),
+            size = 5, fontface = "bold") +
+  scale_fill_viridis_c(option = "mako", direction = -1, limits = c(0, 1)) +
+  scale_y_discrete(limits = rev) + # Keeps SBA at the top left
+  labs(
+    title = "Model Recovery: Binary Classification",
+    x = "Winning Candidate Model (Max Weight)", 
+    y = "True Generating Model",
+    fill = "Win Rate"
+  ) +
+  theme(panel.grid = element_blank())
+
+
 
 
 ```
