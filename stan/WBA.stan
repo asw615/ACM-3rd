@@ -30,7 +30,7 @@ model {
     real beta_post = 0.5
       + own_weighting * (8 - FirstRating[i])
       + external_weighting * (8 - GroupRating[i]);
-    target += beta_binomial_lpmf(SecondRating[i] - 1 | 7, alpha_post, beta_post); 
+    target += beta_binomial_lpmf(SecondRating[i] - 1 | 7, alpha_post, beta_post);
   }
 }
 
@@ -54,7 +54,7 @@ generated quantities {
     real alpha_prior_pred = 0.5
       + own_weighting_prior * (FirstRating[i] - 1)
       + external_weighting_prior * (GroupRating[i] - 1);
-    
+
     real beta_post = 0.5
       + own_weighting * (8 - FirstRating[i])
       + external_weighting * (8 - GroupRating[i]);
