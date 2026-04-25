@@ -1,7 +1,7 @@
 
 ```{r}
-set.seed(1)
-pacman::p_load(cmdstanr, tidyverse, cowplot)
+set.seed(0)
+pacman::p_load(cmdstanr, tidyverse, cowplot, posterior, ggh4x)
 theme_set(theme_cowplot())
 ```
 
@@ -62,32 +62,44 @@ simulate <- function(
 
 simulation <- simulate(
   agent_evaluator=agent.PBA,
-  n_observations=100,
-  alpha_prior=4,
-  beta_prior=3,
+  n_observations=50,
+  alpha_prior=0.5,
+  beta_prior=0.5,
   own_weighting=0.5,
   external_weighting=NA
-) |> mutate(
-    Feedback=GroupRating-FirstRating,
-    Change=SecondRating-FirstRating,
-    AbsChange=abs(SecondRating-FirstRating)
 )
 
 simulation
+
+add_diagnostic_columns <- function(data) {
+  data |> mutate(
+    Feedback=GroupRating-FirstRating,
+    Change=SecondRating-FirstRating,
+  )
+}
+
+plot_feedback_change_relation <- function(data) 
+{
+  ggplot(data) +
+    geom_jitter(aes(x=Feedback, y=Change), width=0.1, height=0.1, alpha=0.5, shape=1) +
+    scale_x_continuous(breaks=seq(-7, 7), limits=c(-7.5, 7.5)) +
+    scale_y_continuous(breaks=seq(-7, 7), limits=c(-7.5, 7.5)) +
+    geom_vline(xintercept=0, alpha=0.2) +
+    geom_hline(yintercept=0, alpha=0.2) +
+    coord_fixed()
+}
+
+plot_feedback_change_relation(add_diagnostic_columns(simulation))
 ```
 
-
-```{r}
-ggplot(simulation) +
-  geom_jitter(aes(x=Feedback, y=Change), width=0.2, height=0.2, shape=1)
-```
 
 
 ```{r fig.width = 10}
-simulation |> head(20) |>  ggplot() +
+plot_participant_behaviour <- function(data) {
+  ggplot(data) +
   geom_segment(
     aes(x=FaceID, y=FirstRating, yend=SecondRating), 
-    arrow=arrow(type="closed", length = unit(0.4, "cm"))
+    arrow=arrow(type="closed", length = unit(0.2, "cm"))
   ) +
   geom_point(
     aes(x=FaceID, y=FirstRating), 
@@ -98,7 +110,10 @@ simulation |> head(20) |>  ggplot() +
     color="red"
   ) +
   scale_y_continuous(breaks=seq(1, 8)) +
-  labs(y="Rating")
+  labs(y="Ratings (arrow to second rating, red denotes group rating)")
+}
+
+plot_participant_behaviour(add_diagnostic_columns(simulation))
 ```
 
 
@@ -106,7 +121,7 @@ simulation |> head(20) |>  ggplot() +
 
 
 ```{r}
-simulation |> pivot_longer(
+add_diagnostic_columns(simulation) |> pivot_longer(
   cols=c(FirstRating, GroupRating, SecondRating),
   names_to="Observation",
   values_to="Rating",
@@ -117,15 +132,15 @@ simulation |> pivot_longer(
   facet_wrap(~Observation) +
   labs(y="Observation count")
 
-simulation |> pivot_longer(
-  cols=c(Feedback, Change, AbsChange),
+add_diagnostic_columns(simulation) |> pivot_longer(
+  cols=c(Feedback, Change),
   names_to="Observation",
   values_to="Offset",
 ) |> ggplot(aes(x=Offset)) +
   geom_bar() +
   stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
   scale_x_continuous(breaks=seq(-7, 7), limits=c(-7, 7)) +
-  facet_wrap(~factor(Observation, c("Feedback", "Change", "AbsChange"))) +
+  facet_wrap(~factor(Observation, c("Feedback", "Change"))) +
   labs(y="Observation count")
 ```
 
@@ -133,149 +148,153 @@ simulation |> pivot_longer(
 
 ## Setting up agent types
 
-agents_wba <- tibble(
-  AgentType    = c("Self-Focused", "Balanced", "Socially-Influenced"),
-  own_weighting = c(1.5, 1.0, 0.5),
-  external_weighting = c(0.5, 1.0, 2.0)
-)
-
-agents_pba <- tibble(
-  AgentType    = c("Self-Focused", "Balanced", "Socially-Influenced"),
-  own_weighting = c(1.5, 1.0, 0.5),
-  external_weighting = NA
-)
-
-## Global params 
-n_observations <- 100
-alpha_prior    <- 4
-beta_prior     <- 3
-
-## adding columns to identify agent type and ModelType in the results
-run_sim <- function(agent_evaluator, own_weighting, external_weighting, AgentType, ModelType) {
-  simulate(
-    agent_evaluator    = agent_evaluator,
-    n_observations     = n_observations,
-    alpha_prior        = alpha_prior,
-    beta_prior         = beta_prior,
-    own_weighting      = own_weighting,
-    external_weighting = external_weighting
-  ) |> mutate(
-    Feedback   = GroupRating - FirstRating,
-    Change     = SecondRating - FirstRating,
-    AbsChange  = abs(SecondRating - FirstRating),
-    AgentType = AgentType,
-    ModelType = ModelType
-  )
-}
-
-## run for pba typologies
-results_pba <- agents_pba |>
-  pmap(function(AgentType, own_weighting, external_weighting) {
-    run_sim(agent.PBA, own_weighting, external_weighting, AgentType, ModelType = "PBA")
-  }) |>
-  list_rbind() |> drop_na(SecondRating)
-
-## run for wba typologies
-results_wba <- agents_wba |>
-  pmap(function(AgentType, own_weighting, external_weighting) {
-    run_sim(agent.WBA, own_weighting, external_weighting, AgentType, ModelType = "WBA")
-  }) |>
-  list_rbind()|> drop_na(SecondRating)
-
-## combine
-results_all <- bind_rows(results_pba, results_wba)
+# agents_wba <- tibble(
+#   AgentType    = c("Self-Focused", "Balanced", "Socially-Influenced"),
+#   own_weighting = c(1.5, 1.0, 0.5),
+#   external_weighting = c(0.5, 1.0, 2.0)
+# )
+# 
+# agents_pba <- tibble(
+#   AgentType    = c("Self-Focused", "Balanced", "Socially-Influenced"),
+#   own_weighting = c(1.5, 1.0, 0.5),
+#   external_weighting = NA
+# )
+# 
+# ## Global params 
+# n_observations <- 100
+# alpha_prior    <- 4
+# beta_prior     <- 3
+# 
+# ## adding columns to identify agent type and ModelType in the results
+# run_sim <- function(agent_evaluator, own_weighting, external_weighting, AgentType, ModelType) {
+#   simulate(
+#     agent_evaluator    = agent_evaluator,
+#     n_observations     = n_observations,
+#     alpha_prior        = alpha_prior,
+#     beta_prior         = beta_prior,
+#     own_weighting      = own_weighting,
+#     external_weighting = external_weighting
+#   ) |> mutate(
+#     Feedback   = GroupRating - FirstRating,
+#     Change     = SecondRating - FirstRating,
+#     AbsChange  = abs(SecondRating - FirstRating),
+#     AgentType = AgentType,
+#     ModelType = ModelType
+#   )
+# }
+# 
+# ## run for pba typologies
+# results_pba <- agents_pba |>
+#   pmap(function(AgentType, own_weighting, external_weighting) {
+#     run_sim(agent.PBA, own_weighting, external_weighting, AgentType, ModelType = "PBA")
+#   }) |>
+#   list_rbind() |> drop_na(SecondRating)
+# 
+# ## run for wba typologies
+# results_wba <- agents_wba |>
+#   pmap(function(AgentType, own_weighting, external_weighting) {
+#     run_sim(agent.WBA, own_weighting, external_weighting, AgentType, ModelType = "WBA")
+#   }) |>
+#   list_rbind()|> drop_na(SecondRating)
+# 
+# ## combine
+# results_all <- bind_rows(results_pba, results_wba)
 
 ```
 
 
 ```{r}
-
 ## Plot the combined results for each ModelType and AgentType
 
-for (m in unique(results_all$ModelType)) {
-  p <- results_all |>
-    filter(ModelType == m) |>
-    ggplot(aes(x = SecondRating, fill = AgentType)) +
-    geom_histogram(binwidth = 1, position = "dodge", colour = "white") +
-    facet_wrap(~ AgentType, labeller = label_both) +
-    scale_fill_brewer(palette = "Set1") +
-    labs(title    = paste("Distribution of Second Ratings —", m),
-      x = "Second Rating",
-      y = "Count",
-      fill = "Agent Type") +
-    theme(legend.position = "bottom")
-  
-  print(p)
+# for (m in unique(results_all$ModelType)) {
+#   p <- results_all |>
+#     filter(ModelType == m) |>
+#     ggplot(aes(x = SecondRating, fill = AgentType)) +
+#     geom_histogram(binwidth = 1, position = "dodge", colour = "white") +
+#     facet_wrap(~ AgentType, labeller = label_both) +
+#     scale_fill_brewer(palette = "Set1") +
+#     labs(title    = paste("Distribution of Second Ratings —", m),
+#       x = "Second Rating",
+#       y = "Count",
+#       fill = "Agent Type") +
+#     theme(legend.position = "bottom")
+#   
+#   print(p)
+# }
+
+```
+
+
+```{r}
+get_draws <- function(fit, params) { 
+  as_draws_df(fit$draws()) |> 
+    as_tibble() |> 
+    select(all_of(params)) |> 
+    pivot_longer(everything(), names_to = "parameter", values_to = "value") |> 
+    mutate(
+      source = if_else(str_detect(parameter, "_prior$"), "Prior", "Posterior"),
+      parameter = str_remove(parameter, "_prior$"),
+    )
 }
 
-```
+cogsci_data_observations <- read_csv("./data/cogsci_clean.csv") |> filter(FirstRating != 0, GroupRating != 0, SecondRating != 0) |> filter(ID<=10)
 
-```{r}
-model <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE))
+fits <- list()
+draws <- tibble()
+diagnostics <- tibble()
+loos <- list()
 
-model_fits <- list()
-
-for (type in unique(results_pba$AgentType)) {
-  agent_observations <- subset(results_pba, AgentType == type)
-  
-  model_fit <- model$sample(
-    data = list(
-      N=nrow(agent_observations),
-      FirstRating=agent_observations$FirstRating,
-      GroupRating=agent_observations$GroupRating,
-      SecondRating=agent_observations$SecondRating
-    ),
-    seed = 0,
-    chains = 4,
-    iter_sampling = 1000,
-    iter_warmup = 1000,
-    refresh = 0
-  )
-  model_fits[[type]] <- model_fit 
-}
-
-```
-
-```{r}
-model_fits[["Balanced"]]
-```
-
-
-```{r}
-
-## Testing on real data 
-
-cogsci_pre <- read_csv("./data/cogsci_clean.csv")
-
-
-## Remove rows in FirstRating, GroupRating and SecondRating that are = 0 
-
-cogsci_pre <- cogsci_pre |> filter(FirstRating != 0, GroupRating != 0, SecondRating != 0)
-
-
-## Running the model on experimental data 
-
-model <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE)) ## PBA
-
-model_fit <- model$sample(
-  data = list(
-    N=nrow(cogsci_pre),
-    FirstRating=cogsci_pre$FirstRating,
-    GroupRating=cogsci_pre$GroupRating,
-    SecondRating=cogsci_pre$SecondRating
-  ),
-  seed = 0,
-  chains = 4,
-  iter_sampling = 2000,
-  iter_warmup = 1000,
-  refresh = 0
+models <- list(
+  PBA=cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE)),
+  WBA=cmdstan_model("./stan/WBA.stan", cpp_options=list(stan_threads=FALSE))
 )
 
+for (participant_id in unique(cogsci_data_observations$ID)) {
+  cogsci_data_observations.participant <- cogsci_data_observations |> filter(ID==participant_id)
+  particpant_data = list(
+    N=nrow(cogsci_data_observations.participant),
+    FirstRating=cogsci_data_observations.participant$FirstRating,
+    GroupRating=cogsci_data_observations.participant$GroupRating,
+    SecondRating=cogsci_data_observations.participant$SecondRating
+  )
 
+  for (model in names(models)) {
+    fit <- models[[model]]$sample(
+      data=particpant_data,
+      seed = 0,
+      chains = 4,
+      parallel_chains = 4,
+      iter_sampling = 1000,
+      iter_warmup = 1000,
+      refresh = 0
+    )
+    fits <- append(fits, fit)
+    draws <- bind_rows(draws, mutate(get_draws(fit, params = everything()), model=model, ID=participant_id))
+    diagnostics <- bind_rows(diagnostics, mutate(fit$sampler_diagnostics() |> as_draws_df() |> as_tibble() |> select(divergent__, .chain, .iteration, .draw), model=model, ID=participant_id))
+  }
+}
+
+
+#OCCASIONAl WARNING:
+#Chain 4 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:
+#Chain 4 Exception: beta_binomial_lpmf: First prior sample size parameter is nan, but must be positive finite! (in '/var/folders/7q/nqnlmy5d1_15vrk6dv1x103h0000gn/T/RtmpVzUrzU/model-f0e52907dd3b.stan', line 33, column 4 to column 81)
+#Chain 4 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,
+#Chain 4 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.
+#Chain 4 
 ```
 
-```{r}
-model_fit$print(max_rows = 20)
-```
+```{r fig.width=14}
+plot_prior_posterior <- function(draws) {
+  ggplot(draws, aes(x = value, fill = source, colour = source)) +
+    geom_density(alpha = 0.35, linewidth = 0.7) +
+    facet_grid2(rows=vars(ID), cols=vars(parameter), scales = "free", independent = "y") +
+    labs(
+      title = "Prior–posterior updates per participant",
+      x = NULL, y = "Density", fill = NULL, colour = NULL
+    )
+}
 
+plot_prior_posterior(draws |> filter(model == "PBA", parameter %in% c("p")))
+plot_prior_posterior(draws |> filter(model == "WBA", parameter %in% c("rho", "kappa")))
+```
 

@@ -40,13 +40,13 @@ generated quantities {
     real alpha_post = 0.5
       + p * (FirstRating[i] - 1)
       + (1 - p) * (GroupRating[i] - 1);
-    real beta_post = 0.5
-      + p * (8 - FirstRating[i])
-      + (1 - p) * (8 - GroupRating[i]);
-
     real alpha_prior_pred = 0.5
       + p_prior * (FirstRating[i] - 1)
       + (1 - p_prior) * (GroupRating[i] - 1);
+    
+    real beta_post = 0.5
+      + p * (8 - FirstRating[i])
+      + (1 - p) * (8 - GroupRating[i]);
     real beta_prior_pred = 0.5
       + p_prior * (8 - FirstRating[i])
       + (1 - p_prior) * (8 - GroupRating[i]);
