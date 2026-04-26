@@ -1,7 +1,7 @@
 
 ```{r}
 set.seed(0)
-pacman::p_load(cmdstanr, tidyverse, cowplot, posterior, ggh4x)
+pacman::p_load(cmdstanr, tidyverse, cowplot, posterior, ggh4x, ggpmisc, tidybayes)
 theme_set(theme_cowplot())
 ```
 
@@ -67,6 +67,8 @@ simulation <- simulate(
   beta_prior=0.5,
   own_weighting=0.5,
   external_weighting=NA
+) |> mutate(
+  ID=1
 )
 
 simulation
@@ -78,15 +80,19 @@ add_diagnostic_columns <- function(data) {
   )
 }
 
-plot_feedback_change_relation <- function(data) 
+plot_feedback_change_relation <- function(data, title="", alpha=0.5) 
 {
-  ggplot(data) +
-    geom_jitter(aes(x=Feedback, y=Change), width=0.1, height=0.1, alpha=0.5, shape=1) +
-    scale_x_continuous(breaks=seq(-7, 7), limits=c(-7.5, 7.5)) +
-    scale_y_continuous(breaks=seq(-7, 7), limits=c(-7.5, 7.5)) +
+  ggplot(data, aes(x=Feedback, y=Change)) +
+    geom_jitter(width=0.1, height=0.1, alpha=alpha, shape=1) +
+    scale_x_continuous(breaks=seq(-7, 7, 2), limits=c(-7.5, 7.5)) +
+    scale_y_continuous(breaks=seq(-7, 7, 2), limits=c(-7.5, 7.5)) +
     geom_vline(xintercept=0, alpha=0.2) +
     geom_hline(yintercept=0, alpha=0.2) +
-    coord_fixed()
+    stat_correlation(small.r=TRUE) +
+    geom_smooth(method=lm, formula=y~x, se=TRUE) +
+    labs(title=title) +
+    coord_fixed() +
+    facet_wrap(~ID, ncol=5)
 }
 
 plot_feedback_change_relation(add_diagnostic_columns(simulation))
@@ -110,14 +116,12 @@ plot_participant_behaviour <- function(data) {
     color="red"
   ) +
   scale_y_continuous(breaks=seq(1, 8)) +
-  labs(y="Ratings (arrow to second rating, red denotes group rating)")
+  facet_wrap(~ID) +
+  labs(y="Ratings") # arrow points to second rating, red denotes group rating
 }
 
 plot_participant_behaviour(add_diagnostic_columns(simulation))
 ```
-
-
-
 
 
 ```{r}
@@ -129,7 +133,7 @@ add_diagnostic_columns(simulation) |> pivot_longer(
   geom_bar() +
   stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
   scale_x_continuous(breaks=seq(1, 8)) +
-  facet_wrap(~Observation) +
+  facet_grid(rows=vars(ID), cols=vars(Observation)) +
   labs(y="Observation count")
 
 add_diagnostic_columns(simulation) |> pivot_longer(
@@ -140,12 +144,11 @@ add_diagnostic_columns(simulation) |> pivot_longer(
   geom_bar() +
   stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
   scale_x_continuous(breaks=seq(-7, 7), limits=c(-7, 7)) +
-  facet_wrap(~factor(Observation, c("Feedback", "Change"))) +
+  facet_grid(rows=vars(ID), cols=vars(factor(Observation, c("Feedback", "Change")))) +
   labs(y="Observation count")
 ```
 
 ```{r}
-
 ## Setting up agent types
 
 # agents_wba <- tibble(
@@ -237,12 +240,15 @@ get_draws <- function(fit, params) {
     )
 }
 
-cogsci_data_observations <- read_csv("./data/cogsci_clean.csv") |> filter(FirstRating != 0, GroupRating != 0, SecondRating != 0) |> filter(ID<=10)
+cogsci_data_observations <- read_csv("./data/cogsci_clean.csv") |> 
+  filter(FirstRating != 0, GroupRating != 0, SecondRating != 0) |> 
+  mutate(FaceID = as.integer(factor(FaceID))) |> 
+  filter(ID<=5)
 
 fits <- list()
 draws <- tibble()
+predictions <- tibble()
 diagnostics <- tibble()
-loos <- list()
 
 models <- list(
   PBA=cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE)),
@@ -266,35 +272,46 @@ for (participant_id in unique(cogsci_data_observations$ID)) {
       parallel_chains = 4,
       iter_sampling = 1000,
       iter_warmup = 1000,
+      show_messages = FALSE,
+      show_exceptions = TRUE,
       refresh = 0
     )
     fits <- append(fits, fit)
     draws <- bind_rows(draws, mutate(get_draws(fit, params = everything()), model=model, ID=participant_id))
+    predictions <- bind_rows(predictions, left_join(mutate(fit |> spread_draws(prior_pred[FaceID], posterior_pred[FaceID]), model=model, ID=participant_id), select(cogsci_data_observations.participant, !ID), by = "FaceID"))
     diagnostics <- bind_rows(diagnostics, mutate(fit$sampler_diagnostics() |> as_draws_df() |> as_tibble() |> select(divergent__, .chain, .iteration, .draw), model=model, ID=participant_id))
   }
 }
 
-
-#OCCASIONAl WARNING:
-#Chain 4 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:
-#Chain 4 Exception: beta_binomial_lpmf: First prior sample size parameter is nan, but must be positive finite! (in '/var/folders/7q/nqnlmy5d1_15vrk6dv1x103h0000gn/T/RtmpVzUrzU/model-f0e52907dd3b.stan', line 33, column 4 to column 81)
-#Chain 4 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,
-#Chain 4 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.
-#Chain 4 
+# OCCASIONAl WARNING:
+# Chain 4 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:
+# Chain 4 Exception: beta_binomial_lpmf: First prior sample size parameter is nan, but must be positive finite! (in '/var/folders/7q/nqnlmy5d1_15vrk6dv1x103h0000gn/T/RtmpVzUrzU/model-f0e52907dd3b.stan', line 33, column 4 to column 81)
+# Chain 4 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,
+# Chain 4 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.
 ```
 
-```{r fig.width=14}
-plot_prior_posterior <- function(draws) {
+```{r fig.width=12}
+plot_prior_posterior_update <- function(draws, title="") {
   ggplot(draws, aes(x = value, fill = source, colour = source)) +
-    geom_density(alpha = 0.35, linewidth = 0.7) +
+    geom_density(alpha = 0.33, linewidth = 0.7) +
     facet_grid2(rows=vars(ID), cols=vars(parameter), scales = "free", independent = "y") +
     labs(
-      title = "Prior–posterior updates per participant",
+      title = title,
       x = NULL, y = "Density", fill = NULL, colour = NULL
-    )
+    ) +
+    scale_y_continuous(breaks = scales::pretty_breaks(n = 3))
 }
 
-plot_prior_posterior(draws |> filter(model == "PBA", parameter %in% c("p")))
-plot_prior_posterior(draws |> filter(model == "WBA", parameter %in% c("rho", "kappa")))
+plot_prior_posterior_update(draws |> filter(model == "PBA", parameter %in% c("p")), title="PBA participant-level prior–posterior update")
+plot_prior_posterior_update(draws |> filter(model == "WBA", parameter %in% c("rho", "kappa")), title="WBA participant-level prior–posterior update")
 ```
 
+```{r fig.width=12}
+predictions.PBA <- predictions |> filter(model=="PBA")
+plot_feedback_change_relation(predictions.PBA |> mutate(Feedback=GroupRating-FirstRating, Change=prior_pred-FirstRating) |> drop_na() |> group_by(FaceID) |> sample_n(100), alpha=0.1, title="PBA prior predictive")
+plot_feedback_change_relation(predictions.PBA |> mutate(Feedback=GroupRating-FirstRating, Change=posterior_pred-FirstRating) |> drop_na() |> group_by(FaceID) |> sample_n(100), alpha=0.1, title="PBA posterior predictive")
+
+predictions.WBA <- predictions |> filter(model=="WBA")
+plot_feedback_change_relation(predictions.WBA |> mutate(Feedback=GroupRating-FirstRating, Change=prior_pred-FirstRating) |> drop_na() |> group_by(FaceID) |> sample_n(100), alpha=0.1, title="WBA prior predictive")
+plot_feedback_change_relation(predictions.WBA |> mutate(Feedback=GroupRating-FirstRating, Change=posterior_pred-FirstRating) |> drop_na() |> group_by(FaceID) |> sample_n(100), alpha=0.1, title="WBA posterior predictive")
+```
