@@ -1,7 +1,7 @@
 
 ```{r}
-set.seed(1)
-pacman::p_load(cmdstanr, tidyverse, cowplot)
+set.seed(0)
+pacman::p_load(cmdstanr, tidyverse, cowplot, posterior, ggh4x, ggpmisc, tidybayes)
 theme_set(theme_cowplot())
 ```
 
@@ -315,43 +315,3 @@ predictions.WBA <- predictions |> filter(model=="WBA")
 plot_feedback_change_relation(predictions.WBA |> mutate(Feedback=GroupRating-FirstRating, Change=prior_pred-FirstRating) |> drop_na() |> group_by(FaceID) |> sample_n(100), alpha=0.1, title="WBA prior predictive")
 plot_feedback_change_relation(predictions.WBA |> mutate(Feedback=GroupRating-FirstRating, Change=posterior_pred-FirstRating) |> drop_na() |> group_by(FaceID) |> sample_n(100), alpha=0.1, title="WBA posterior predictive")
 ```
-
-
-```{r}
-
-## Testing on real data 
-
-cogsci_pre <- read_csv("./data/cogsci_clean.csv")
-
-
-## Remove rows in FirstRating, GroupRating and SecondRating that are = 0 
-
-cogsci_pre <- cogsci_pre |> filter(FirstRating != 0, GroupRating != 0, SecondRating != 0)
-
-
-## Running the model on experimental data 
-
-model <- cmdstan_model("./stan/PBA.stan", cpp_options=list(stan_threads=FALSE)) ## PBA
-
-model_fit <- model$sample(
-  data = list(
-    N=nrow(cogsci_pre),
-    FirstRating=cogsci_pre$FirstRating,
-    GroupRating=cogsci_pre$GroupRating,
-    SecondRating=cogsci_pre$SecondRating
-  ),
-  seed = 0,
-  chains = 4,
-  iter_sampling = 2000,
-  iter_warmup = 1000,
-  refresh = 0
-)
-
-
-```
-
-```{r}
-model_fit$print(max_rows = 20)
-```
-
-
