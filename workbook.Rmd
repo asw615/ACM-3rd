@@ -68,10 +68,9 @@ simulation <- simulate(
   own_weighting=0.5,
   external_weighting=NA
 ) |> mutate(
-  ID=1
+  ID=1,
+  model=""
 )
-
-simulation
 
 add_diagnostic_columns <- function(data) {
   data |> mutate(
@@ -92,7 +91,7 @@ plot_feedback_change_relation <- function(data, title="", alpha=0.5)
     geom_smooth(method=lm, formula=y~x, se=TRUE) +
     labs(title=title) +
     coord_fixed() +
-    facet_wrap(~ID, ncol=5)
+    facet_grid(rows=vars(ID), cols=vars(model))
 }
 
 plot_feedback_change_relation(add_diagnostic_columns(simulation))
@@ -116,7 +115,7 @@ plot_participant_behaviour <- function(data) {
     color="red"
   ) +
   scale_y_continuous(breaks=seq(1, 8)) +
-  facet_wrap(~ID) +
+  facet_grid(rows=vars(ID)) +
   labs(y="Ratings") # arrow points to second rating, red denotes group rating
 }
 
@@ -147,84 +146,298 @@ add_diagnostic_columns(simulation) |> pivot_longer(
   facet_grid(rows=vars(ID), cols=vars(factor(Observation, c("Feedback", "Change")))) +
   labs(y="Observation count")
 ```
-
 ```{r}
+
 ## Setting up agent types
 
-# agents_wba <- tibble(
-#   AgentType    = c("Self-Focused", "Balanced", "Socially-Influenced"),
-#   own_weighting = c(1.5, 1.0, 0.5),
-#   external_weighting = c(0.5, 1.0, 2.0)
-# )
-# 
-# agents_pba <- tibble(
-#   AgentType    = c("Self-Focused", "Balanced", "Socially-Influenced"),
-#   own_weighting = c(1.5, 1.0, 0.5),
-#   external_weighting = NA
-# )
-# 
-# ## Global params 
-# n_observations <- 100
-# alpha_prior    <- 4
-# beta_prior     <- 3
-# 
-# ## adding columns to identify agent type and ModelType in the results
-# run_sim <- function(agent_evaluator, own_weighting, external_weighting, AgentType, ModelType) {
-#   simulate(
-#     agent_evaluator    = agent_evaluator,
-#     n_observations     = n_observations,
-#     alpha_prior        = alpha_prior,
-#     beta_prior         = beta_prior,
-#     own_weighting      = own_weighting,
-#     external_weighting = external_weighting
-#   ) |> mutate(
-#     Feedback   = GroupRating - FirstRating,
-#     Change     = SecondRating - FirstRating,
-#     AbsChange  = abs(SecondRating - FirstRating),
-#     AgentType = AgentType,
-#     ModelType = ModelType
-#   )
-# }
-# 
-# ## run for pba typologies
-# results_pba <- agents_pba |>
-#   pmap(function(AgentType, own_weighting, external_weighting) {
-#     run_sim(agent.PBA, own_weighting, external_weighting, AgentType, ModelType = "PBA")
-#   }) |>
-#   list_rbind() |> drop_na(SecondRating)
-# 
-# ## run for wba typologies
-# results_wba <- agents_wba |>
-#   pmap(function(AgentType, own_weighting, external_weighting) {
-#     run_sim(agent.WBA, own_weighting, external_weighting, AgentType, ModelType = "WBA")
-#   }) |>
-#   list_rbind()|> drop_na(SecondRating)
-# 
-# ## combine
-# results_all <- bind_rows(results_pba, results_wba)
+agents_wba <- tibble(
+  AgentType    = c("Self-Focused", "Balanced", "Socially-Influenced"),
+  own_weighting = c(1.5, 1.0, 0.5),
+  external_weighting = c(0.5, 1.0, 2.0)
+)
+
+agents_pba <- tibble(
+  AgentType    = c("Self-Focused", "Balanced", "Socially-Influenced"),
+  own_weighting = c(1, 0.5, 0.25),
+  external_weighting = NA
+)
+
+## Global params 
+n_observations <- 100
+alpha_prior    <- 4
+beta_prior     <- 3
+
+## adding columns to identify agent type and ModelType in the results
+run_sim <- function(agent_evaluator, own_weighting, external_weighting, AgentType, ModelType) {
+  simulate(
+    agent_evaluator    = agent_evaluator,
+    n_observations     = n_observations,
+    alpha_prior        = alpha_prior,
+    beta_prior         = beta_prior,
+    own_weighting      = own_weighting,
+    external_weighting = external_weighting
+  ) |> mutate(
+    Feedback   = GroupRating - FirstRating,
+    Change     = SecondRating - FirstRating,
+    AbsChange  = abs(SecondRating - FirstRating),
+    AgentType = AgentType,
+    ModelType = ModelType
+  )
+}
+
+## run for pba typologies
+results_pba <- agents_pba |>
+  pmap(function(AgentType, own_weighting, external_weighting) {
+    run_sim(agent.PBA, own_weighting, external_weighting, AgentType, ModelType = "PBA")
+  }) |>
+  list_rbind() |> drop_na(SecondRating)
+
+## run for wba typologies
+results_wba <- agents_wba |>
+  pmap(function(AgentType, own_weighting, external_weighting) {
+    run_sim(agent.WBA, own_weighting, external_weighting, AgentType, ModelType = "WBA")
+  }) |>
+  list_rbind()|> drop_na(SecondRating)
+
+## combine
+results_all <- bind_rows(results_pba, results_wba)
 
 ```
 
 
 ```{r}
+
 ## Plot the combined results for each ModelType and AgentType
 
-# for (m in unique(results_all$ModelType)) {
-#   p <- results_all |>
-#     filter(ModelType == m) |>
-#     ggplot(aes(x = SecondRating, fill = AgentType)) +
-#     geom_histogram(binwidth = 1, position = "dodge", colour = "white") +
-#     facet_wrap(~ AgentType, labeller = label_both) +
-#     scale_fill_brewer(palette = "Set1") +
-#     labs(title    = paste("Distribution of Second Ratings —", m),
-#       x = "Second Rating",
-#       y = "Count",
-#       fill = "Agent Type") +
-#     theme(legend.position = "bottom")
-#   
-#   print(p)
-# }
+for (m in unique(results_all$ModelType)) {
+  p <- results_all |>
+    filter(ModelType == m) |>
+    ggplot(aes(x = SecondRating, fill = AgentType)) +
+    geom_histogram(binwidth = 1, position = "dodge", colour = "white") +
+    facet_wrap(~ AgentType) +
+    scale_fill_brewer(palette = "Set1") +
+    labs(title    = paste("Distribution of Second Ratings:", m),
+      x = "Second Rating",
+      y = "Count",
+      fill = "Agent Type") +
+    theme(legend.position = "bottom")
+  
+  print(p)
+}
 
+```
+
+```{r}
+
+## Model recovery across PBA and WBA agent typologies
+n_sims <- 50 ## EDIT FOR REAL RECOV PLEASE MATTIS
+
+## Function for prepping the data 
+
+prepare_stan_data <- function(df) {
+  list(
+    N            = nrow(df),
+    FirstRating  = as.integer(df$FirstRating),
+    GroupRating  = as.integer(df$GroupRating),
+    SecondRating = as.integer(df$SecondRating)
+  )
+}
+
+
+regenerate_simulations <- TRUE  # set to FALSE to load from disk next time
+
+if (regenerate_simulations || !file.exists("./model_recovery.rds")) {
+
+  ## Build simulation grid 
+  ## Cross each agent typology with n_sims replicates
+  sim_grid <- bind_rows(
+    agents_pba |> mutate(ModelType = "PBA"),
+    agents_wba |> mutate(ModelType = "WBA")
+  ) |>
+    crossing(sim_id = 1:n_sims) 
+
+  ## Fit both candidate models to every simulated dataset
+  results_list <- vector("list", nrow(sim_grid))
+
+  for (i in seq_len(nrow(sim_grid))) {
+    row             <- sim_grid[i, ]
+    true_mod        <- row$ModelType
+    true_agent_type <- row$AgentType
+    true_own        <- row$own_weighting
+    true_ext        <- row$external_weighting  # NA for PBA rows
+    id              <- row$sim_id
+
+    ## Simulate fresh data 
+    agent_fn <- if (true_mod == "PBA") agent.PBA else agent.WBA
+
+    df <- run_sim(
+      agent_evaluator    = agent_fn,
+      own_weighting      = true_own,
+      external_weighting = true_ext,
+      AgentType          = true_agent_type,
+      ModelType          = true_mod
+    )
+
+    stan_data <- prepare_stan_data(df)
+    
+    ## Init models 
+    
+    mod_proportional <- cmdstan_model("./stan/PBA.stan")
+    mod_weighted     <- cmdstan_model("./stan/WBA.stan")
+    
+
+    ## Fit PBA candidate model
+    fit_p <- mod_proportional$sample(
+      data          = stan_data,
+      chains        = 2,
+      iter_warmup   = 500,
+      iter_sampling = 500,
+      refresh       = 0,
+      show_messages = FALSE,
+      save_warmup   = TRUE
+    )
+
+    ## Fit WBA candidate model
+    fit_w <- mod_weighted$sample(
+      data          = stan_data,
+      chains        = 2,
+      iter_warmup   = 500,
+      iter_sampling = 500,
+      refresh       = 0,
+      show_messages = FALSE,
+      save_warmup   = TRUE
+    )
+
+    ## LOO-CV for model comparison
+    loo_p <- fit_p$loo()
+    loo_w <- fit_w$loo()
+
+    weights <- loo::loo_model_weights(
+      list(PBA = loo_p, WBA = loo_w),
+      method = "stacking"
+    )
+
+    ## Posterior draws
+    pba_draws <- fit_p$draws(format = "df")
+    wba_draws <- fit_w$draws(format = "df")
+
+    results_list[[i]] <- tibble(
+      sim_id             = id,
+      true_model         = true_mod,
+      true_agent_type    = true_agent_type,
+      true_own_weighting = true_own,
+      true_ext_weighting = true_ext,          # NA for PBA-generated rows
+
+      ## Stacking weights — primary recovery signal
+      weight_PBA = as.numeric(weights["PBA"]),
+      weight_WBA = as.numeric(weights["WBA"]),
+
+      ## Recovered parameters from PBA candidate
+      ## PBA only has own_weighting (external_weighting = 1 - own_weighting)
+      pba_recovered_own = mean(pba_draws$p),
+      pba_recovered_ext = 1 - mean(pba_draws$p),
+
+      ## Recovered parameters from WBA candidate
+      wba_recovered_own = mean(wba_draws$own_weighting),
+      wba_recovered_ext = mean(wba_draws$external_weighting)
+    )
+  }
+
+  recovery_results <- bind_rows(results_list)
+  saveRDS(recovery_results, "./model_recovery.rds")
+} else {
+  recovery_results <- readRDS("./model_recovery.rds")
+}
+
+```
+
+
+```{r}
+## Visualizing the sampling process 
+
+# fit wba
+
+np_w <- nuts_params(fit_w)
+
+# Trace plots
+bayesplot::mcmc_trace(
+  fit_w$draws(format = "array"),
+  pars = c("rho", "kappa"),
+  np   = np_w
+)
+
+
+# fit pba 
+np_p <- nuts_params(fit_p)
+
+
+# Trace plots
+bayesplot::mcmc_trace(
+  fit_p$draws(format = "array"),
+  pars = "p",
+  np   = np_p
+)
+
+cat("PBA divergences:", mean(np_p$Value[np_p$Parameter == "divergent__"]) * 100, "%\n")
+cat("WBA divergences:", mean(np_w$Value[np_w$Parameter == "divergent__"]) * 100, "%\n")
+
+```
+
+
+
+
+```{r}
+
+## Visualizations of the model recovery - Riccardos Viz - Currently the models are not very distinguishable, its all just PBA
+
+binary_matrix <- recovery_results |>
+  # 1. Reshape to make finding the maximum weight per simulation easier
+  pivot_longer(cols = starts_with("weight_"), 
+               names_to = "predicted_model", values_to = "weight") |>
+  mutate(predicted_model = str_remove(predicted_model, "weight_")) |>
+  
+  # 2. Keep only the winning model for each simulation
+  group_by(sim_id) |>
+  slice_max(weight, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  
+  # 3. Count the wins and calculate proportions per true model
+  count(true_model, predicted_model) |>
+  group_by(true_model) |>
+  mutate(proportion = n / sum(n)) |>
+  ungroup() |>
+  
+  # 4. Ensure we have all combinations factored correctly (handles 0% scenarios)
+  mutate(
+    true_model = factor(true_model, levels = c("PBA", "WBA")),
+    predicted_model = factor(predicted_model, levels = c("PBA", "WBA"))
+  ) |>
+  complete(true_model, predicted_model, fill = list(n = 0, proportion = 0))
+
+
+binary_matrix |>
+  ggplot(aes(x = predicted_model, y = true_model, fill = proportion)) +
+  geom_tile(color = "white", linewidth = 1) +
+  geom_text(aes(label = scales::percent(proportion, accuracy = 1)),
+            size = 5, fontface = "bold") +
+  scale_fill_viridis_c(option = "mako", direction = -1, limits = c(0, 1)) +
+  scale_y_discrete(limits = rev) + # Keeps SBA at the top left
+  labs(
+    title = "Model Recovery - Confusion matrix",
+    x = "Winning Candidate Model (Max Weight)", 
+    y = "True Generating Model",
+    fill = "Win Rate"
+  ) +
+  theme(panel.grid = element_blank())
+```
+
+```{r fig.height=12}
+cogsci_data_observations <- read_csv("./data/cogsci_clean.csv") |> 
+  filter(FirstRating != 0, GroupRating != 0, SecondRating != 0) |> 
+  mutate(FaceID = as.integer(factor(FaceID))) |> 
+  filter(ID<=5)
+
+plot_participant_behaviour(add_diagnostic_columns(cogsci_data_observations))
 ```
 
 
@@ -239,11 +452,6 @@ get_draws <- function(fit, params) {
       parameter = str_remove(parameter, "_prior$"),
     )
 }
-
-cogsci_data_observations <- read_csv("./data/cogsci_clean.csv") |> 
-  filter(FirstRating != 0, GroupRating != 0, SecondRating != 0) |> 
-  mutate(FaceID = as.integer(factor(FaceID))) |> 
-  filter(ID<=5)
 
 fits <- list()
 draws <- tibble()
@@ -284,10 +492,14 @@ for (participant_id in unique(cogsci_data_observations$ID)) {
 }
 
 # OCCASIONAl WARNING:
-# Chain 4 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:
-# Chain 4 Exception: beta_binomial_lpmf: First prior sample size parameter is nan, but must be positive finite! (in '/var/folders/7q/nqnlmy5d1_15vrk6dv1x103h0000gn/T/RtmpVzUrzU/model-f0e52907dd3b.stan', line 33, column 4 to column 81)
-# Chain 4 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,
-# Chain 4 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.
+#Chain 4 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:
+#Chain 4 Exception: WBA_model_namespace::log_prob: external_weighting is nan, but must be greater than or equal to 0.000000 (in '/var/folders/7q/nqnlmy5d1_15vrk6dv1x103h0000gn/T/Rtmp60JPlJ/model-2d4472e52049.stan', line 17, column 2 to column 55)
+#Chain 4 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,
+#Chain 4 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.
+```
+
+```{r}
+diagnostics$divergent__ |> sum()
 ```
 
 ```{r fig.width=12}
@@ -306,12 +518,16 @@ plot_prior_posterior_update(draws |> filter(model == "PBA", parameter %in% c("p"
 plot_prior_posterior_update(draws |> filter(model == "WBA", parameter %in% c("rho", "kappa")), title="WBA participant-level prior–posterior update")
 ```
 
-```{r fig.width=12}
-predictions.PBA <- predictions |> filter(model=="PBA")
-plot_feedback_change_relation(predictions.PBA |> mutate(Feedback=GroupRating-FirstRating, Change=prior_pred-FirstRating) |> drop_na() |> group_by(FaceID) |> sample_n(100), alpha=0.1, title="PBA prior predictive")
-plot_feedback_change_relation(predictions.PBA |> mutate(Feedback=GroupRating-FirstRating, Change=posterior_pred-FirstRating) |> drop_na() |> group_by(FaceID) |> sample_n(100), alpha=0.1, title="PBA posterior predictive")
+```{r fig.height=10}
+collapsed_preds <- predictions |> summarise(
+  .by = c(ID, FaceID, model),
+  prior_pred=median(prior_pred, na.rm=TRUE),
+  posterior_pred=median(posterior_pred, na.rm=TRUE),
+  FirstRating=first(FirstRating),
+  GroupRating=first(GroupRating),
+  SecondRating=first(SecondRating),
+) |> drop_na(ID, FaceID, FirstRating, GroupRating, SecondRating, prior_pred, posterior_pred)
 
-predictions.WBA <- predictions |> filter(model=="WBA")
-plot_feedback_change_relation(predictions.WBA |> mutate(Feedback=GroupRating-FirstRating, Change=prior_pred-FirstRating) |> drop_na() |> group_by(FaceID) |> sample_n(100), alpha=0.1, title="WBA prior predictive")
-plot_feedback_change_relation(predictions.WBA |> mutate(Feedback=GroupRating-FirstRating, Change=posterior_pred-FirstRating) |> drop_na() |> group_by(FaceID) |> sample_n(100), alpha=0.1, title="WBA posterior predictive")
+plot_feedback_change_relation(collapsed_preds |> mutate(Feedback=GroupRating-FirstRating, Change=prior_pred-FirstRating), title="Prior predictive checks")
+plot_feedback_change_relation(collapsed_preds |> mutate(Feedback=GroupRating-FirstRating, Change=posterior_pred-FirstRating), title="Posterior predictive checks")
 ```
