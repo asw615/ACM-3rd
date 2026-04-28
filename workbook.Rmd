@@ -531,3 +531,83 @@ collapsed_preds <- predictions |> summarise(
 plot_feedback_change_relation(collapsed_preds |> mutate(Feedback=GroupRating-FirstRating, Change=prior_pred-FirstRating), title="Prior predictive checks")
 plot_feedback_change_relation(collapsed_preds |> mutate(Feedback=GroupRating-FirstRating, Change=posterior_pred-FirstRating), title="Posterior predictive checks")
 ```
+
+```{r save-plots}
+dir.create("plots", showWarnings = FALSE)
+
+p_feedback_change_sim <- plot_feedback_change_relation(add_diagnostic_columns(simulation))
+ggsave("plots/feedback_change_simulation.png", p_feedback_change_sim, width = 6, height = 6)
+
+p_participant_behaviour_sim <- plot_participant_behaviour(add_diagnostic_columns(simulation))
+ggsave("plots/participant_behaviour_simulation.png", p_participant_behaviour_sim, width = 10, height = 5)
+
+p_rating_distributions <- add_diagnostic_columns(simulation) |> pivot_longer(
+  cols = c(FirstRating, GroupRating, SecondRating),
+  names_to = "Observation", values_to = "Rating"
+) |> ggplot(aes(x = Rating)) +
+  geom_bar() +
+  stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
+  scale_x_continuous(breaks = seq(1, 8)) +
+  facet_grid(rows = vars(ID), cols = vars(Observation)) +
+  labs(y = "Observation count")
+ggsave("plots/rating_distributions.png", p_rating_distributions, width = 8, height = 4)
+
+p_offset_distributions <- add_diagnostic_columns(simulation) |> pivot_longer(
+  cols = c(Feedback, Change),
+  names_to = "Observation", values_to = "Offset"
+) |> ggplot(aes(x = Offset)) +
+  geom_bar() +
+  stat_summary(aes(xintercept = after_stat(x), y = 0), fun = mean, geom = "vline", orientation = "y") +
+  scale_x_continuous(breaks = seq(-7, 7), limits = c(-7, 7)) +
+  facet_grid(rows = vars(ID), cols = vars(factor(Observation, c("Feedback", "Change")))) +
+  labs(y = "Observation count")
+ggsave("plots/offset_distributions.png", p_offset_distributions, width = 8, height = 4)
+
+for (m in unique(results_all$ModelType)) {
+  p <- results_all |>
+    filter(ModelType == m) |>
+    ggplot(aes(x = SecondRating, fill = AgentType)) +
+    geom_histogram(binwidth = 1, position = "dodge", colour = "white") +
+    facet_wrap(~ AgentType) +
+    scale_fill_brewer(palette = "Set1") +
+    labs(title = paste("Distribution of Second Ratings:", m),
+         x = "Second Rating", y = "Count", fill = "Agent Type") +
+    theme(legend.position = "bottom")
+  ggsave(paste0("plots/second_ratings_", tolower(m), ".png"), p, width = 10, height = 5)
+}
+
+np_w_local <- bayesplot::nuts_params(fit_w)
+np_p_local <- bayesplot::nuts_params(fit_p)
+
+p_trace_wba <- bayesplot::mcmc_trace(fit_w$draws(format = "array"), pars = c("rho", "kappa"), np = np_w_local)
+ggsave("plots/trace_wba.png", p_trace_wba, width = 10, height = 5)
+
+p_trace_pba <- bayesplot::mcmc_trace(fit_p$draws(format = "array"), pars = "p", np = np_p_local)
+ggsave("plots/trace_pba.png", p_trace_pba, width = 8, height = 4)
+
+p_confusion_matrix <- binary_matrix |>
+  ggplot(aes(x = predicted_model, y = true_model, fill = proportion)) +
+  geom_tile(color = "white", linewidth = 1) +
+  geom_text(aes(label = scales::percent(proportion, accuracy = 1)), size = 5, fontface = "bold") +
+  scale_fill_viridis_c(option = "mako", direction = -1, limits = c(0, 1)) +
+  scale_y_discrete(limits = rev) +
+  labs(title = "Model Recovery - Confusion matrix",
+       x = "Winning Candidate Model (Max Weight)", y = "True Generating Model", fill = "Win Rate") +
+  theme(panel.grid = element_blank())
+ggsave("plots/model_recovery_confusion_matrix.png", p_confusion_matrix, width = 6, height = 5)
+
+p_participant_behaviour_cogsci <- plot_participant_behaviour(add_diagnostic_columns(cogsci_data_observations))
+ggsave("plots/participant_behaviour_cogsci.png", p_participant_behaviour_cogsci, width = 10, height = 12)
+
+p_prior_posterior_pba <- plot_prior_posterior_update(draws |> filter(model == "PBA", parameter %in% c("p")), title = "PBA participant-level prior–posterior update")
+ggsave("plots/prior_posterior_pba.png", p_prior_posterior_pba, width = 12, height = 8)
+
+p_prior_posterior_wba <- plot_prior_posterior_update(draws |> filter(model == "WBA", parameter %in% c("rho", "kappa")), title = "WBA participant-level prior–posterior update")
+ggsave("plots/prior_posterior_wba.png", p_prior_posterior_wba, width = 12, height = 8)
+
+p_prior_pred_checks <- plot_feedback_change_relation(collapsed_preds |> mutate(Feedback = GroupRating - FirstRating, Change = prior_pred - FirstRating), title = "Prior predictive checks")
+ggsave("plots/prior_predictive_checks.png", p_prior_pred_checks, width = 10, height = 10)
+
+p_posterior_pred_checks <- plot_feedback_change_relation(collapsed_preds |> mutate(Feedback = GroupRating - FirstRating, Change = posterior_pred - FirstRating), title = "Posterior predictive checks")
+ggsave("plots/posterior_predictive_checks.png", p_posterior_pred_checks, width = 10, height = 10)
+```
