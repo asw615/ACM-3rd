@@ -157,7 +157,7 @@ During warmup, WBA sometimes warns that `external_weighting` is NaN. This happen
 
 ### Empirical Data
 
-The empirical dataset (`cogsci_clean.csv`) comes from a facial attractiveness rating study. Five participants are fit individually (no pooling), each having rated roughly 60 faces with group feedback between rounds.
+The empirical dataset (`cogsci_clean.csv`) comes from cogsci's rating facial attractiveness rating study pre corona pandemic. Five participants are fit individually (no pooling), each having rated roughly 60 faces with group feedback between rounds.
 
 #### Data exploration
 
