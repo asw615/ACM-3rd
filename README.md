@@ -1,4 +1,4 @@
-# ACM Portfolio 3 — Bayesian Models of Social Conformity
+# ACM Portfolio 3 - Bayesian Models of Social Conformity
 
 This project models how people update attractiveness ratings after seeing group feedback. Two Bayesian agents are implemented, PBA and WBA, fit to both simulated and empirical data in Stan, and compared using LOO-CV.
 
@@ -8,7 +8,7 @@ This project models how people update attractiveness ratings after seeing group 
 
 ```
 ACM-3rd/
-├── workbook.Rmd          # Main analysis — all code, models, plots
+├── workbook.Rmd          # Main analysis - all code, models, plots
 ├── stan/
 │   ├── PBA.stan          # Proportional Bayesian Agent Stan model
 │   └── WBA.stan          # Weighted Bayesian Agent Stan model
