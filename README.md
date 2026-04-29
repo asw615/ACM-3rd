@@ -201,6 +201,3 @@ All participants end up with posterior mass between 0.7 and 0.9. They weight the
 
 ---
 
-### Model Comparison
-
-Both models are compared per participant using LOO-CV stacking weights, computed during the empirical fitting loop and accessible in the `fits` object in the workbook. Both models recover similar self-weighting estimates (around 0.75-0.85), produce nearly identical posterior predictive performance, and model recovery already showed they are hard to tell apart at N=100. Stacking weights end up close to 50/50 for most participants. Given that, PBA is the practical choice. It has one parameter instead of two, and the data do not justify the extra complexity of WBA.
