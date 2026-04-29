@@ -1,11 +1,14 @@
 
 ```{r}
 set.seed(0)
-pacman::p_load(cmdstanr, tidyverse, cowplot, posterior, ggh4x, ggpmisc, tidybayes)
+pacman::p_load(cmdstanr, tidyverse, cowplot, posterior, ggh4x, ggpmisc, tidybayes, loo)
 theme_set(theme_cowplot())
 ```
 
 ```{r}
+
+## Simulating the two agents
+
 agent.PBA <- Vectorize(function(
     alpha_prior,
     beta_prior,
@@ -100,6 +103,9 @@ plot_feedback_change_relation(add_diagnostic_columns(simulation))
 
 
 ```{r fig.width = 10}
+
+## Participant change 
+
 plot_participant_behaviour <- function(data) {
   ggplot(data) +
   geom_segment(
@@ -120,10 +126,14 @@ plot_participant_behaviour <- function(data) {
 }
 
 plot_participant_behaviour(add_diagnostic_columns(simulation))
+
 ```
 
 
 ```{r}
+
+## Plotting the ratings, feedback and change
+
 add_diagnostic_columns(simulation) |> pivot_longer(
   cols=c(FirstRating, GroupRating, SecondRating),
   names_to="Observation",
@@ -146,6 +156,11 @@ add_diagnostic_columns(simulation) |> pivot_longer(
   facet_grid(rows=vars(ID), cols=vars(factor(Observation, c("Feedback", "Change")))) +
   labs(y="Observation count")
 ```
+
+
+
+
+
 ```{r}
 
 ## Setting up agent types
@@ -432,6 +447,9 @@ binary_matrix |>
 ```
 
 ```{r fig.height=12}
+
+## visualization of the empirical dataset
+
 cogsci_data_observations <- read_csv("./data/cogsci_clean.csv") |> 
   filter(FirstRating != 0, GroupRating != 0, SecondRating != 0) |> 
   mutate(FaceID = as.integer(factor(FaceID))) |> 
@@ -442,6 +460,9 @@ plot_participant_behaviour(add_diagnostic_columns(cogsci_data_observations))
 
 
 ```{r}
+
+## Fitting to empirical data
+
 get_draws <- function(fit, params) { 
   as_draws_df(fit$draws()) |> 
     as_tibble() |> 
@@ -484,7 +505,9 @@ for (participant_id in unique(cogsci_data_observations$ID)) {
       show_exceptions = TRUE,
       refresh = 0
     )
-    fits <- append(fits, fit)
+    
+   
+   fits <- append(fits, fit) 
     draws <- bind_rows(draws, mutate(get_draws(fit, params = everything()), model=model, ID=participant_id))
     predictions <- bind_rows(predictions, left_join(mutate(fit |> spread_draws(prior_pred[FaceID], posterior_pred[FaceID]), model=model, ID=participant_id), select(cogsci_data_observations.participant, !ID), by = "FaceID"))
     diagnostics <- bind_rows(diagnostics, mutate(fit$sampler_diagnostics() |> as_draws_df() |> as_tibble() |> select(divergent__, .chain, .iteration, .draw), model=model, ID=participant_id))
@@ -499,10 +522,15 @@ for (participant_id in unique(cogsci_data_observations$ID)) {
 ```
 
 ```{r}
+## Checking divergences
+
 diagnostics$divergent__ |> sum()
 ```
 
 ```{r fig.width=12}
+
+## Prior posterior update
+
 plot_prior_posterior_update <- function(draws, title="") {
   ggplot(draws, aes(x = value, fill = source, colour = source)) +
     geom_density(alpha = 0.33, linewidth = 0.7) +
@@ -519,6 +547,9 @@ plot_prior_posterior_update(draws |> filter(model == "WBA", parameter %in% c("rh
 ```
 
 ```{r fig.height=10}
+
+## Prior and posterior predictive checks
+
 collapsed_preds <- predictions |> summarise(
   .by = c(ID, FaceID, model),
   prior_pred=median(prior_pred, na.rm=TRUE),
@@ -531,6 +562,64 @@ collapsed_preds <- predictions |> summarise(
 plot_feedback_change_relation(collapsed_preds |> mutate(Feedback=GroupRating-FirstRating, Change=prior_pred-FirstRating), title="Prior predictive checks")
 plot_feedback_change_relation(collapsed_preds |> mutate(Feedback=GroupRating-FirstRating, Change=posterior_pred-FirstRating), title="Posterior predictive checks")
 ```
+
+
+```{r}
+
+## Model comparison using loo weights
+
+loo_per_fit <- map(fits, \(f) f$loo())
+
+participant_ids <- unique(cogsci_data_observations$ID)
+model_names     <- names(models)
+n_models        <- length(model_names)
+
+stacking_results <- tibble()
+
+for (i in seq_along(participant_ids)) {
+  idx <- ((i - 1) * n_models + 1):(i * n_models)
+  loo_list <- loo_per_fit[idx]
+  names(loo_list) <- model_names
+
+  w <- loo_model_weights(loo_list, method = "stacking")
+
+  stacking_results <- bind_rows(
+    stacking_results,
+    tibble(model = names(w), weight = as.numeric(w), ID = participant_ids[i])
+  )
+}
+
+## Visualization 
+
+stacking_results |>
+  filter(model == "PBA") |>
+  mutate(
+    ID = factor(ID, levels = unique(cogsci_data_observations$ID)),
+    favours = if_else(weight >= 0.5, "PBA", "WBA")
+  ) |>
+  ggplot(aes(x = weight - 0.5, y = ID, colour = favours)) +
+  geom_segment(aes(x = 0, xend = weight - 0.5, yend = ID),
+               linewidth = 0.7, alpha = 0.6) +
+  geom_point(size = 3) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40", linewidth = 0.4) +
+  scale_colour_manual(values = c(PBA = "#534AB7", WBA = "#0F6E56")) +
+  scale_x_continuous(
+    labels = \(x) scales::percent(x + 0.5),
+    breaks = c(-0.5, -0.25, 0, 0.25, 0.5),
+    limits = c(-0.55, 0.55)
+  ) +
+  labs(
+    x = "PBA stacking weight", y = NULL, colour = "Favours",
+    title = "Model comparison per participant",
+    caption = "Dashed line = equal"
+  ) 
+
+```
+
+
+
+
+
 
 ```{r save-plots}
 dir.create("plots", showWarnings = FALSE)
