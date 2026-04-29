@@ -1,7 +1,7 @@
 
 ```{r}
 set.seed(0)
-pacman::p_load(cmdstanr, tidyverse, cowplot, posterior, ggh4x, ggpmisc, tidybayes, loo)
+pacman::p_load(cmdstanr, tidyverse, cowplot, posterior, ggh4x, ggpmisc, tidybayes, loo, bayesplot, patchwork)
 theme_set(theme_cowplot())
 ```
 
@@ -616,6 +616,42 @@ stacking_results |>
 
 ```
 
+```{r}
+
+## traceplots for the fits 
+
+model_params <- list(
+  PBA = "p",
+  WBA = c("rho", "kappa")
+)
+
+participant_ids <- unique(cogsci_data_observations$ID)
+model_names <- c("PBA", "WBA")
+
+pba_plots <- list()
+wba_plots <- list()
+
+for (i in seq_along(participant_ids)) {
+  for (j in seq_along(model_names)) {
+    idx   <- (i - 1) * length(model_names) + j
+    fit   <- fits[[idx]]
+    np    <- nuts_params(fit)
+    model <- model_names[j]
+    
+    p <- bayesplot::mcmc_trace(
+      fit$draws(format = "array"),
+      pars = model_params[[model]],
+      np   = np
+    ) + ggtitle(paste(model, "-", participant_ids[i]))
+    
+    if (model == "PBA") pba_plots[[i]] <- p
+    if (model == "WBA") wba_plots[[i]] <- p
+  }
+}
+
+wrap_plots(pba_plots, ncol = 2)
+wrap_plots(wba_plots, ncol = 2, width = 40)
+```
 
 
 
