@@ -59,7 +59,7 @@ ACM-3rd/
 
 ### Empirical Data
 
-The empirical dataset (`cogsci_clean.csv`) comes from cogsci's rating facial attractiveness rating study pre corona pandemic. Five participants are fit individually (no pooling), each having rated 70 faces with group feedback between rounds.
+The empirical dataset (`cogsci_clean.csv`) comes from cogsci's rating facial trustworthiness pre corona pandemic. Five participants are fit individually (no pooling), each having rated 70 faces with group feedback between rounds.
 
 #### Data exploration
 
